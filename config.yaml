@@ -1,0 +1,88 @@
+# OnlyIchu — Ichimoku Cloud options strategy on Upstox
+# mode: paper (simulated fills, real market data) | live (real orders on Upstox)
+mode: paper
+
+data:
+  # Completed 1-minute candles are pulled from Upstox's intraday candle REST API,
+  # then aggregated into 5-minute candles locally.
+  poll_interval_seconds: 5
+  # Days of historical 1m candles fetched at startup to warm up the indicators
+  # (Ichimoku needs 52 + 26 = 78 completed candles per timeframe; 5m needs ~2 sessions).
+  warmup_days: 7
+
+session:
+  timezone: Asia/Kolkata
+  market_open: "09:15"
+  market_close: "15:30"
+  # No fresh entries after this time
+  entry_cutoff: "15:00"
+  # All open positions are force-closed at this time
+  square_off: "15:15"
+
+strategy:
+  # Both pipelines run independently per index, exactly per the strategy spec.
+  timeframes_minutes: [1, 5]
+  tenkan: 9
+  kijun: 26
+  senkou_b: 52
+  displacement: 26
+
+options:
+  # ITM option selection: pick the strike whose delta is closest to target_delta
+  # within [delta_min, delta_max] (absolute value for puts).
+  target_delta: 0.70
+  delta_min: 0.65
+  delta_max: 0.75
+  # nearest = nearest unexpired expiry (weekly / 0DTE when available)
+  expiry: nearest
+  # LIMIT places a marketable limit at LTP +/- limit_tolerance_pct; MARKET uses market orders.
+  order_type: LIMIT
+  limit_tolerance_pct: 0.25
+  # I = intraday, D = delivery/margin
+  product: I
+
+risk:
+  lots_per_trade: 1
+  max_trades_per_day_per_pipeline: 10
+  # Stop taking new entries once realized PnL for the day is below -max_daily_loss (INR). 0 disables.
+  max_daily_loss: 10000
+
+paper:
+  starting_cash: 500000
+  # applied against LTP on simulated fills (buy worse, sell worse)
+  slippage_pct: 0.05
+  state_file: state/paper_state.json
+  trade_log: state/trades_paper.csv
+
+live:
+  trade_log: state/trades_live.csv
+
+# Index universe. `key` is the Upstox instrument key — verify any key with:
+#   python -m onlyichu instruments --search "smlcap"
+# options_available=false indices have no exchange-traded options; they are traded
+# synthetically at index level in paper mode and skipped in live mode.
+instruments:
+  - name: NIFTY
+    key: "NSE_INDEX|Nifty 50"
+    enabled: true
+    options_available: true
+  - name: BANKNIFTY
+    key: "NSE_INDEX|Nifty Bank"
+    enabled: true
+    options_available: true
+  - name: FINNIFTY
+    key: "NSE_INDEX|Nifty Fin Service"
+    enabled: true
+    options_available: true
+  - name: MIDCPNIFTY
+    key: "NSE_INDEX|NIFTY MID SELECT"
+    enabled: true
+    options_available: true
+  - name: SMALLCAP
+    key: "NSE_INDEX|Nifty Smlcap 50"
+    enabled: true
+    options_available: false
+  - name: LARGECAP
+    key: "NSE_INDEX|Nifty 100"
+    enabled: true
+    options_available: false
