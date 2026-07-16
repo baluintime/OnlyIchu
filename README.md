@@ -87,6 +87,23 @@ Both modes need a valid access token (paper mode uses real market data). The eng
 5. enforces the entry cutoff, daily trade caps, daily loss limit, and force
    square-off (defaults: no entries after 15:00, square-off 15:15 IST).
 
+### Live web dashboard
+
+```bash
+python -m onlyichu web            # http://127.0.0.1:8080
+```
+
+A rich, animated, auto-refreshing page (no charts): it fetches historical +
+intraday 1-minute candles from Upstox, computes the Ichimoku Cloud server-side
+for every index on both the 1m and 5m timeframes, and shows per pipeline the
+live signal (LONG / SHORT / NEUTRAL with glow animations), price position vs
+each of the four levels (▲/▼ with distance % and meter bars), the Kumo
+boundaries and bull/bear state, LTP with day change, market status, and the
+paper account strip (cash, PnL, open positions). The browser polls
+`/api/dashboard` every `web.refresh_seconds` (default 10s) with a countdown
+ring; values flash green/red as they change. Host/port/refresh are set under
+`web:` in `config.yaml` or via `--host/--port`.
+
 ### Other commands
 
 ```bash
@@ -117,7 +134,9 @@ onlyichu/
   broker.py      PaperBroker (simulated) and LiveBroker (real orders)
   engine.py      polling loop, session windows, risk guards, square-off
   backtest.py    historical replay of the signal logic
-  cli.py         login / instruments / run / backtest / status
+  web.py         Flask dashboard: candle fetch + Ichimoku snapshot API
+  templates/     animated auto-refreshing dashboard page
+  cli.py         login / instruments / run / web / backtest / status
 ```
 
 ## ⚠️ Disclaimer

@@ -1,5 +1,6 @@
 requests>=2.31
 PyYAML>=6.0
+Flask>=3.0
 
 # dev / tests
 pytest>=7.4

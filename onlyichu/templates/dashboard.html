@@ -1,0 +1,487 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OnlyIchu — Ichimoku Cloud Dashboard</title>
+<style>
+  :root {
+    --bg0: #060913; --bg1: #0b1226; --bg2: #101a35;
+    --card: rgba(255,255,255,.045); --card-border: rgba(255,255,255,.09);
+    --text: #e8edf7; --muted: #8b96ad; --faint: #5b6479;
+    --green: #22c55e; --green-soft: rgba(34,197,94,.14);
+    --red: #f4405f; --red-soft: rgba(244,64,95,.14);
+    --amber: #f5b93c; --amber-soft: rgba(245,185,60,.12);
+    --cyan: #38bdf8; --violet: #8b7cf6;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    font: 15px/1.45 "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
+    color: var(--text); background: var(--bg0); overflow-x: hidden;
+  }
+  /* animated aurora background */
+  body::before, body::after {
+    content: ""; position: fixed; inset: -40%; z-index: -1; pointer-events: none;
+    background:
+      radial-gradient(38% 30% at 22% 28%, rgba(56,189,248,.13), transparent 60%),
+      radial-gradient(30% 34% at 78% 20%, rgba(139,124,246,.14), transparent 60%),
+      radial-gradient(34% 30% at 60% 80%, rgba(34,197,94,.08), transparent 60%);
+    animation: aurora 26s ease-in-out infinite alternate;
+  }
+  body::after { animation-duration: 34s; animation-direction: alternate-reverse; opacity: .7; }
+  @keyframes aurora {
+    0%   { transform: translate(0,0) rotate(0deg) scale(1); }
+    50%  { transform: translate(4%, -3%) rotate(4deg) scale(1.06); }
+    100% { transform: translate(-4%, 3%) rotate(-3deg) scale(1.02); }
+  }
+
+  .wrap { max-width: 1440px; margin: 0 auto; padding: 22px 26px 60px; }
+
+  /* ---------------- header ---------------- */
+  header {
+    display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
+    padding: 14px 20px; border-radius: 18px;
+    background: linear-gradient(120deg, rgba(255,255,255,.06), rgba(255,255,255,.02));
+    border: 1px solid var(--card-border); backdrop-filter: blur(14px);
+    animation: fadeDown .6s ease both;
+  }
+  @keyframes fadeDown { from { opacity:0; transform: translateY(-14px);} to { opacity:1; transform:none; } }
+  .brand { display: flex; align-items: center; gap: 12px; margin-right: auto; }
+  .brand .logo {
+    width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center;
+    font-weight: 800; font-size: 19px; color: #fff;
+    background: conic-gradient(from 200deg, var(--cyan), var(--violet), var(--green), var(--cyan));
+    animation: spinHue 14s linear infinite;
+  }
+  @keyframes spinHue { to { filter: hue-rotate(360deg); } }
+  .brand h1 { font-size: 20px; letter-spacing: .4px; }
+  .brand small { display:block; color: var(--muted); font-weight: 400; font-size: 12px; }
+
+  .pill {
+    display: inline-flex; align-items: center; gap: 8px; padding: 7px 14px;
+    border-radius: 999px; font-size: 13px; font-weight: 600; letter-spacing: .5px;
+    border: 1px solid var(--card-border); background: rgba(255,255,255,.04); color: var(--muted);
+  }
+  .pill .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--faint); }
+  .pill.open { color: var(--green); border-color: rgba(34,197,94,.35); background: var(--green-soft); }
+  .pill.open .dot { background: var(--green); animation: ping 1.6s ease-out infinite; }
+  .pill.closed { color: var(--red); border-color: rgba(244,64,95,.3); background: var(--red-soft); }
+  .pill.closed .dot { background: var(--red); }
+  .pill.preopen { color: var(--amber); border-color: rgba(245,185,60,.3); background: var(--amber-soft); }
+  .pill.preopen .dot { background: var(--amber); animation: ping 2.4s ease-out infinite; }
+  @keyframes ping { 0% { box-shadow: 0 0 0 0 rgba(34,197,94,.55);} 100% { box-shadow: 0 0 0 9px rgba(34,197,94,0);} }
+
+  .clock { font-variant-numeric: tabular-nums; font-size: 15px; color: var(--text); }
+  .clock small { color: var(--muted); display: block; font-size: 11px; text-align: right; }
+
+  .refresh { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 12px; }
+  .ring { position: relative; width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center;
+          background: conic-gradient(var(--cyan) var(--deg,0deg), rgba(255,255,255,.09) 0deg); transition: background .15s linear; }
+  .ring::before { content: ""; position: absolute; inset: 4px; border-radius: 50%; background: var(--bg1); }
+  .ring span { position: relative; font-size: 11px; font-variant-numeric: tabular-nums; color: var(--text); }
+
+  /* ---------------- banners & strips ---------------- */
+  .banner {
+    margin-top: 14px; padding: 12px 18px; border-radius: 14px; font-size: 14px;
+    background: var(--red-soft); border: 1px solid rgba(244,64,95,.35); color: #ffb3c0;
+    display: none; animation: fadeDown .4s ease both;
+  }
+  .banner.show { display: block; }
+
+  .paper {
+    margin-top: 14px; padding: 12px 18px; border-radius: 14px; display: none;
+    align-items: center; gap: 22px; flex-wrap: wrap; font-size: 13.5px;
+    background: var(--card); border: 1px solid var(--card-border); backdrop-filter: blur(10px);
+    animation: fadeDown .5s ease both;
+  }
+  .paper.show { display: flex; }
+  .paper .kv small { display: block; color: var(--muted); font-size: 11px; letter-spacing: .6px; text-transform: uppercase; }
+  .paper .kv b { font-size: 16px; font-variant-numeric: tabular-nums; }
+  .paper .pos-chip {
+    padding: 5px 11px; border-radius: 999px; font-size: 12px; border: 1px solid var(--card-border);
+    background: rgba(255,255,255,.05);
+  }
+  .paper .pos-chip.LONG { color: var(--green); border-color: rgba(34,197,94,.4); }
+  .paper .pos-chip.SHORT { color: var(--red); border-color: rgba(244,64,95,.4); }
+
+  /* ---------------- cards grid ---------------- */
+  .grid { margin-top: 20px; display: grid; gap: 18px; grid-template-columns: repeat(auto-fill, minmax(470px, 1fr)); }
+  @media (max-width: 500px){ .grid { grid-template-columns: 1fr; } .wrap { padding: 14px; } }
+
+  .card {
+    border-radius: 20px; padding: 18px 18px 16px; position: relative; overflow: hidden;
+    background: linear-gradient(160deg, rgba(255,255,255,.06), rgba(255,255,255,.02));
+    border: 1px solid var(--card-border); backdrop-filter: blur(14px);
+    opacity: 0; transform: translateY(18px);
+    animation: rise .6s cubic-bezier(.2,.7,.3,1) forwards; animation-delay: var(--d, 0s);
+    transition: border-color .4s;
+  }
+  .card:hover { border-color: rgba(56,189,248,.35); }
+  @keyframes rise { to { opacity: 1; transform: none; } }
+  .card::before { /* sheen sweep */
+    content:""; position:absolute; top:0; left:-70%; width:45%; height:100%;
+    background: linear-gradient(100deg, transparent, rgba(255,255,255,.05), transparent);
+    animation: sheen 7s ease-in-out infinite; animation-delay: var(--d, 0s);
+  }
+  @keyframes sheen { 0%, 60% { left:-70%; } 85%, 100% { left: 130%; } }
+
+  .card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+  .card-head h2 { font-size: 18px; letter-spacing: .5px; }
+  .tagline { color: var(--muted); font-size: 11.5px; margin-top: 2px; }
+  .chip {
+    display: inline-block; margin-top: 6px; padding: 3px 9px; font-size: 10.5px; border-radius: 999px;
+    letter-spacing: .7px; text-transform: uppercase; font-weight: 600;
+    color: var(--cyan); background: rgba(56,189,248,.1); border: 1px solid rgba(56,189,248,.3);
+  }
+  .chip.syn { color: var(--amber); background: var(--amber-soft); border-color: rgba(245,185,60,.35); }
+
+  .price { text-align: right; }
+  .ltp { font-size: 24px; font-weight: 700; font-variant-numeric: tabular-nums; transition: color .3s; }
+  .chg { display: inline-block; margin-top: 3px; padding: 2px 10px; border-radius: 999px; font-size: 12.5px;
+         font-weight: 600; font-variant-numeric: tabular-nums; }
+  .chg.up { color: var(--green); background: var(--green-soft); }
+  .chg.down { color: var(--red); background: var(--red-soft); }
+  .chg.flat { color: var(--muted); background: rgba(255,255,255,.05); }
+
+  .flash-up { animation: flashUp .8s ease; }
+  .flash-down { animation: flashDown .8s ease; }
+  @keyframes flashUp { 20% { color: var(--green); text-shadow: 0 0 14px rgba(34,197,94,.7); } }
+  @keyframes flashDown { 20% { color: var(--red); text-shadow: 0 0 14px rgba(244,64,95,.7); } }
+
+  /* ---------------- pipelines ---------------- */
+  .pipes { display: grid; grid-template-columns: repeat(auto-fit, minmax(215px, 1fr)); gap: 12px; margin-top: 14px; }
+  .pipe {
+    border-radius: 14px; padding: 11px; background: rgba(4,8,18,.45); min-width: 0;
+    border: 1px solid rgba(255,255,255,.07); transition: border-color .5s, box-shadow .5s;
+  }
+  .pipe.sig-LONG { border-color: rgba(34,197,94,.5); box-shadow: inset 0 0 26px rgba(34,197,94,.07), 0 0 18px rgba(34,197,94,.08); }
+  .pipe.sig-SHORT { border-color: rgba(244,64,95,.5); box-shadow: inset 0 0 26px rgba(244,64,95,.07), 0 0 18px rgba(244,64,95,.08); }
+
+  .pipe-head { display: flex; align-items: center; gap: 7px; min-width: 0; }
+  .tf { font-size: 11.5px; font-weight: 700; letter-spacing: 1px; color: var(--cyan);
+        padding: 3px 8px; border-radius: 8px; background: rgba(56,189,248,.1); flex: none; }
+  .sig {
+    margin-left: auto; padding: 3px 10px; border-radius: 999px; font-size: 11px; font-weight: 800;
+    letter-spacing: 1px; color: var(--muted); background: rgba(255,255,255,.06);
+    transition: all .4s; flex: none; white-space: nowrap;
+  }
+  .sig.LONG { color: #06130a; background: var(--green); animation: glowG 1.8s ease-in-out infinite; }
+  .sig.SHORT { color: #190409; background: var(--red); animation: glowR 1.8s ease-in-out infinite; }
+  @keyframes glowG { 50% { box-shadow: 0 0 22px rgba(34,197,94,.75); } }
+  @keyframes glowR { 50% { box-shadow: 0 0 22px rgba(244,64,95,.75); } }
+  .sig-changed { animation: pop .5s cubic-bezier(.2,2,.4,1); }
+  @keyframes pop { 40% { transform: scale(1.22); } }
+
+  .zone { font-size: 10px; letter-spacing: .6px; color: var(--muted); white-space: nowrap;
+          overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .zone.ABOVE { color: var(--green); } .zone.BELOW { color: var(--red); } .zone.IN { color: var(--amber); }
+
+  .close-row { display: flex; justify-content: space-between; align-items: baseline; gap: 8px;
+               margin: 10px 2px 8px; font-size: 12px; color: var(--muted); white-space: nowrap; }
+  .close-row b { color: var(--text); font-size: 14px; font-variant-numeric: tabular-nums; }
+
+  .levels { list-style: none; }
+  .levels li {
+    display: grid; grid-template-columns: minmax(52px,1fr) auto auto; align-items: center; gap: 7px;
+    padding: 5.5px 7px; border-radius: 9px; font-size: 12px; position: relative; overflow: hidden;
+  }
+  .levels li:nth-child(odd) { background: rgba(255,255,255,.028); }
+  .levels .lname { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .levels .lval { font-variant-numeric: tabular-nums; color: var(--text); white-space: nowrap; }
+  .levels .ldir { font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums; min-width: 66px; text-align: right; white-space: nowrap; }
+  .levels .ldir.up { color: var(--green); } .levels .ldir.down { color: var(--red); } .levels .ldir.eq { color: var(--muted); }
+  .levels .meter { position: absolute; left: 0; bottom: 0; height: 2px; border-radius: 2px;
+                   transition: width .8s cubic-bezier(.2,.7,.3,1), background .4s; }
+
+  .cloud-row {
+    margin-top: 9px; padding: 7px 9px; border-radius: 10px; font-size: 11.5px;
+    display: flex; justify-content: space-between; align-items: center; gap: 6px; flex-wrap: wrap;
+    background: linear-gradient(90deg, rgba(56,189,248,.08), rgba(139,124,246,.08));
+    border: 1px dashed rgba(255,255,255,.12); color: var(--muted);
+  }
+  .cloud-row b { color: var(--text); font-variant-numeric: tabular-nums; }
+  .kumo { font-weight: 700; letter-spacing: .5px; }
+  .kumo.bull { color: var(--green); } .kumo.bear { color: var(--red); }
+
+  .warming { padding: 18px 8px; text-align: center; color: var(--muted); font-size: 12.5px; }
+  .warming .bar { height: 5px; border-radius: 4px; background: rgba(255,255,255,.08); margin-top: 10px; overflow: hidden; }
+  .warming .bar i { display: block; height: 100%; border-radius: 4px;
+                    background: linear-gradient(90deg, var(--cyan), var(--violet));
+                    transition: width .8s ease; position: relative; }
+  .warming .bar i::after { content:""; position:absolute; inset:0;
+                    background: linear-gradient(90deg, transparent, rgba(255,255,255,.5), transparent);
+                    animation: shimmer 1.5s linear infinite; }
+  @keyframes shimmer { from { transform: translateX(-100%);} to { transform: translateX(100%);} }
+
+  .idx-error { margin-top: 12px; padding: 10px 12px; border-radius: 10px; font-size: 12px;
+               color: #ffb3c0; background: var(--red-soft); border: 1px solid rgba(244,64,95,.3); word-break: break-word; }
+
+  /* loading skeleton */
+  .skeleton { margin-top: 20px; display: grid; gap: 18px; grid-template-columns: repeat(auto-fill, minmax(430px,1fr)); }
+  .skeleton .sk { height: 300px; border-radius: 20px; background: linear-gradient(110deg, rgba(255,255,255,.04) 30%, rgba(255,255,255,.09) 45%, rgba(255,255,255,.04) 60%); background-size: 220% 100%; animation: skshine 1.4s linear infinite; }
+  @keyframes skshine { to { background-position-x: -220%; } }
+
+  footer { margin-top: 30px; text-align: center; color: var(--faint); font-size: 12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="brand">
+      <div class="logo">一</div>
+      <div>
+        <h1>OnlyIchu <small id="strategyMeta">Ichimoku Cloud · multi-timeframe</small></h1>
+      </div>
+    </div>
+    <div class="pill" id="marketPill"><span class="dot"></span><span id="marketText">…</span></div>
+    <div class="clock"><span id="clock">--:--:--</span><small id="clockDate">IST</small></div>
+    <div class="refresh">
+      <div class="ring" id="ring"><span id="ringSec">-</span></div>
+      <div>auto<br>refresh</div>
+    </div>
+  </header>
+
+  <div class="banner" id="banner"></div>
+
+  <div class="paper" id="paperStrip">
+    <div class="kv"><small>Paper cash</small><b id="paperCash">—</b></div>
+    <div class="kv"><small>Realized PnL <span id="paperDate"></span></small><b id="paperPnl">—</b></div>
+    <div class="kv"><small>Open positions</small><b id="paperCount">0</b></div>
+    <div id="paperPositions" style="display:flex;gap:8px;flex-wrap:wrap"></div>
+  </div>
+
+  <div class="skeleton" id="skeleton">
+    <div class="sk"></div><div class="sk"></div><div class="sk"></div>
+    <div class="sk"></div><div class="sk"></div><div class="sk"></div>
+  </div>
+  <div class="grid" id="grid"></div>
+
+  <footer>
+    Signals are evaluated strictly on completed candle closes · LONG = close above all Ichimoku levels (buy ITM call)
+    · SHORT = close below all levels (buy ITM put) · Educational use only — not investment advice.
+  </footer>
+</div>
+
+<script>
+const REFRESH_S = {{ refresh_seconds }};
+const fmt = new Intl.NumberFormat("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const $ = (id) => document.getElementById(id);
+let nextFetchAt = performance.now();
+
+/* ---------- live IST clock ---------- */
+function tickClock() {
+  const now = new Date();
+  const ist = new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", second: "2-digit" }).format(now);
+  const d = new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Kolkata", weekday: "short", day: "2-digit", month: "short" }).format(now);
+  $("clock").textContent = ist;
+  $("clockDate").textContent = d + " · IST";
+}
+setInterval(tickClock, 1000); tickClock();
+
+/* ---------- refresh countdown ring ---------- */
+function tickRing() {
+  const left = Math.max(0, nextFetchAt - performance.now());
+  const frac = 1 - left / (REFRESH_S * 1000);
+  $("ring").style.setProperty("--deg", (frac * 360) + "deg");
+  $("ringSec").textContent = Math.ceil(left / 1000);
+  requestAnimationFrame(tickRing);
+}
+requestAnimationFrame(tickRing);
+
+/* ---------- helpers ---------- */
+function setText(el, text, numericFlash = false) {
+  if (el.textContent === text) return;
+  if (numericFlash) {
+    const prev = parseFloat(el.dataset.raw || "NaN");
+    const next = parseFloat(String(text).replace(/,/g, ""));
+    el.classList.remove("flash-up", "flash-down");
+    void el.offsetWidth; /* restart animation */
+    if (!isNaN(prev) && !isNaN(next) && next !== prev)
+      el.classList.add(next > prev ? "flash-up" : "flash-down");
+    el.dataset.raw = next;
+  }
+  el.textContent = text;
+}
+
+function el(tag, cls, html) {
+  const node = document.createElement(tag);
+  if (cls) node.className = cls;
+  if (html !== undefined) node.innerHTML = html;
+  return node;
+}
+
+/* ---------- card construction ---------- */
+function buildPipe(pipeId) {
+  const pipe = el("div", "pipe");
+  pipe.id = pipeId;
+  pipe.innerHTML = `
+    <div class="pipe-head">
+      <span class="tf"></span>
+      <span class="zone"></span>
+      <span class="sig">—</span>
+    </div>
+    <div class="pipe-body"></div>`;
+  return pipe;
+}
+
+function buildCard(ix, order) {
+  const card = el("div", "card");
+  card.id = "card-" + ix.name;
+  card.style.setProperty("--d", (order * 0.09) + "s");
+  card.innerHTML = `
+    <div class="card-head">
+      <div>
+        <h2>${ix.name}</h2>
+        <div class="tagline">${ix.key}</div>
+        <span class="chip ${ix.options_available ? "" : "syn"}">${ix.options_available ? "ITM options" : "synthetic · no options"}</span>
+      </div>
+      <div class="price">
+        <div class="ltp">—</div>
+        <span class="chg flat">—</span>
+      </div>
+    </div>
+    <div class="pipes"></div>
+    <div class="idx-error" style="display:none"></div>`;
+  return card;
+}
+
+function renderPipe(pipe, p) {
+  pipe.querySelector(".tf").textContent = p.timeframe;
+  const body = pipe.querySelector(".pipe-body");
+  const sig = pipe.querySelector(".sig");
+  const zone = pipe.querySelector(".zone");
+
+  if (!p.ready) {
+    sig.textContent = "WARMUP"; sig.className = "sig"; zone.textContent = "";
+    pipe.className = "pipe";
+    const pct = p.needed ? Math.min(100, Math.round((p.candles || 0) / p.needed * 100)) : 0;
+    body.innerHTML = `<div class="warming">Collecting candles… ${p.candles || 0}/${p.needed || "?"}
+      <div class="bar"><i style="width:${pct}%"></i></div></div>`;
+    return;
+  }
+
+  const prevSig = sig.dataset.sig;
+  sig.textContent = p.signal;
+  sig.className = "sig " + p.signal;
+  if (prevSig && prevSig !== p.signal) { sig.classList.add("sig-changed"); setTimeout(() => sig.classList.remove("sig-changed"), 600); }
+  sig.dataset.sig = p.signal;
+
+  zone.textContent = p.zone;
+  zone.className = "zone " + p.zone.split(" ")[0];
+  pipe.className = "pipe sig-" + p.signal;
+
+  if (!body.querySelector(".levels")) {
+    body.innerHTML = `
+      <div class="close-row"><span>Close <b class="cval"></b></span><span class="ctime"></span></div>
+      <ul class="levels"></ul>
+      <div class="cloud-row"><span>Kumo <b class="cb"></b> – <b class="ct"></b></span><span class="kumo"></span></div>`;
+    const ul = body.querySelector(".levels");
+    for (let i = 0; i < 4; i++) {
+      ul.appendChild(el("li", "", `<span class="lname"></span><span class="lval"></span><span class="ldir"></span><span class="meter"></span>`));
+    }
+  }
+  setText(body.querySelector(".cval"), fmt.format(p.close), true);
+  const ctime = body.querySelector(".ctime");
+  ctime.textContent = "candle " + p.candle_time;
+  ctime.title = p.candle_date + " " + p.candle_time;
+
+  const rows = body.querySelectorAll(".levels li");
+  p.levels.forEach((lv, i) => {
+    const row = rows[i];
+    row.querySelector(".lname").textContent = lv.name;
+    setText(row.querySelector(".lval"), fmt.format(lv.value), true);
+    const dir = row.querySelector(".ldir");
+    const d = lv.dist_pct;
+    dir.textContent = (lv.above ? "▲ +" : lv.below ? "▼ " : "■ ") + d.toFixed(2) + "%";
+    dir.className = "ldir " + (lv.above ? "up" : lv.below ? "down" : "eq");
+    const meter = row.querySelector(".meter");
+    meter.style.width = Math.min(100, Math.abs(d) * 120) + "%";
+    meter.style.background = lv.above ? "var(--green)" : lv.below ? "var(--red)" : "var(--faint)";
+  });
+
+  setText(body.querySelector(".cb"), fmt.format(p.cloud.bottom), true);
+  setText(body.querySelector(".ct"), fmt.format(p.cloud.top), true);
+  const kumo = body.querySelector(".kumo");
+  kumo.textContent = p.cloud.bullish ? "BULL KUMO" : "BEAR KUMO";
+  kumo.className = "kumo " + (p.cloud.bullish ? "bull" : "bear");
+}
+
+function renderIndex(ix, order) {
+  let card = $("card-" + ix.name);
+  if (!card) { card = buildCard(ix, order); $("grid").appendChild(card); }
+
+  const ltpEl = card.querySelector(".ltp");
+  if (ix.ltp != null) setText(ltpEl, fmt.format(ix.ltp), true);
+  const chg = card.querySelector(".chg");
+  if (ix.change_pct != null) {
+    chg.textContent = (ix.change_pct >= 0 ? "+" : "") + ix.change_pct.toFixed(2) + "%";
+    chg.className = "chg " + (ix.change_pct > 0 ? "up" : ix.change_pct < 0 ? "down" : "flat");
+  }
+
+  const err = card.querySelector(".idx-error");
+  err.style.display = ix.error ? "block" : "none";
+  if (ix.error) err.textContent = ix.error;
+
+  const pipes = card.querySelector(".pipes");
+  (ix.pipelines || []).forEach((p) => {
+    const pid = `pipe-${ix.name}-${p.timeframe}`;
+    let pipe = $(pid);
+    if (!pipe) { pipe = buildPipe(pid); pipes.appendChild(pipe); }
+    renderPipe(pipe, p);
+  });
+}
+
+function renderPaper(paper) {
+  const strip = $("paperStrip");
+  if (!paper) { strip.classList.remove("show"); return; }
+  strip.classList.add("show");
+  setText($("paperCash"), "₹ " + fmt.format(paper.cash ?? 0), true);
+  const pnl = paper.realized_pnl_today ?? 0;
+  const pnlEl = $("paperPnl");
+  setText(pnlEl, (pnl >= 0 ? "+₹ " : "-₹ ") + fmt.format(Math.abs(pnl)), true);
+  pnlEl.style.color = pnl > 0 ? "var(--green)" : pnl < 0 ? "var(--red)" : "var(--text)";
+  $("paperDate").textContent = paper.pnl_date ? "(" + paper.pnl_date + ")" : "";
+  setText($("paperCount"), String((paper.positions || []).length));
+  const box = $("paperPositions");
+  box.innerHTML = "";
+  (paper.positions || []).forEach((pos) => {
+    box.appendChild(el("span", "pos-chip " + pos.direction,
+      `${pos.pipeline} · ${pos.symbol} × ${pos.qty} @ ${fmt.format(pos.entry_price)}`));
+  });
+}
+
+/* ---------- polling ---------- */
+async function refresh() {
+  try {
+    const resp = await fetch("/api/dashboard", { cache: "no-store" });
+    const data = await resp.json();
+    $("skeleton").style.display = "none";
+
+    const pill = $("marketPill");
+    const status = (data.market && data.market.status) || "…";
+    $("marketText").textContent = "MARKET " + status + " · " + (data.market ? data.market.session : "");
+    pill.className = "pill " + (status === "OPEN" ? "open" : status === "PRE-OPEN" ? "preopen" : "closed");
+
+    $("strategyMeta").textContent =
+      "Ichimoku " + data.strategy.params + " · " + data.strategy.timeframes.join(" & ") + " · updated " + data.generated_at;
+
+    const banner = $("banner");
+    banner.className = "banner" + (data.error ? " show" : "");
+    if (data.error) banner.textContent = "⚠ " + data.error;
+
+    (data.indices || []).forEach(renderIndex);
+    renderPaper(data.paper);
+  } catch (e) {
+    const banner = $("banner");
+    banner.className = "banner show";
+    banner.textContent = "⚠ Dashboard server unreachable — retrying… (" + e.message + ")";
+  } finally {
+    nextFetchAt = performance.now() + REFRESH_S * 1000;
+    setTimeout(refresh, REFRESH_S * 1000);
+  }
+}
+refresh();
+</script>
+</body>
+</html>

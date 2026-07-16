@@ -49,6 +49,10 @@ class Config:
     max_trades_per_day_per_pipeline: int = 10
     max_daily_loss: float = 10000.0
 
+    web_host: str = "127.0.0.1"
+    web_port: int = 8080
+    web_refresh_seconds: int = 10
+
     paper_starting_cash: float = 500000.0
     paper_slippage_pct: float = 0.05
     paper_state_file: str = "state/paper_state.json"
@@ -113,6 +117,11 @@ def load_config(path: str = "config.yaml") -> Config:
         risk.get("max_trades_per_day_per_pipeline", cfg.max_trades_per_day_per_pipeline)
     )
     cfg.max_daily_loss = float(risk.get("max_daily_loss", cfg.max_daily_loss))
+
+    web = raw.get("web", {}) or {}
+    cfg.web_host = web.get("host", cfg.web_host)
+    cfg.web_port = int(web.get("port", cfg.web_port))
+    cfg.web_refresh_seconds = int(web.get("refresh_seconds", cfg.web_refresh_seconds))
 
     paper = raw.get("paper", {}) or {}
     cfg.paper_starting_cash = float(paper.get("starting_cash", cfg.paper_starting_cash))

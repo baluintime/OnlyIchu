@@ -62,6 +62,18 @@ def cmd_run(args: argparse.Namespace) -> None:
     Engine(cfg, api).run()
 
 
+def cmd_web(args: argparse.Namespace) -> None:
+    from .web import run_web
+
+    cfg = load_config(args.config)
+    if args.host:
+        cfg.web_host = args.host
+    if args.port:
+        cfg.web_port = args.port
+    api = UpstoxAPI(auth.load_token())
+    run_web(cfg, api)
+
+
 def cmd_backtest(args: argparse.Namespace) -> None:
     from .backtest import run_backtest
 
@@ -114,6 +126,12 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--mode", choices=["paper", "live"], help="override mode from config")
     p.add_argument("--yes", action="store_true", help="skip the live-mode confirmation prompt")
     p.set_defaults(func=cmd_run)
+
+    p = sub.add_parser("web", help="serve the live Ichimoku dashboard (auto-refreshing web page)")
+    p.add_argument("--config", default="config.yaml")
+    p.add_argument("--host", default=None, help="bind address (default from config)")
+    p.add_argument("--port", type=int, default=None, help="port (default from config)")
+    p.set_defaults(func=cmd_web)
 
     p = sub.add_parser("backtest", help="replay historical candles through the strategy")
     p.add_argument("--config", default="config.yaml")
