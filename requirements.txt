@@ -1,6 +1,8 @@
 requests>=2.31
 PyYAML>=6.0
 Flask>=3.0
+# IANA timezone database — required on Windows (no system tz database there)
+tzdata>=2024.1
 
 # dev / tests
 pytest>=7.4

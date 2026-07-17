@@ -12,12 +12,12 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from zoneinfo import ZoneInfo
 
 from .candles import Candle, TimeframeAggregator
 from .config import Config
 from .ichimoku import IchimokuParams, compute_state
 from .strategy import ENTER_LONG, ENTER_SHORT, EXIT, decide
+from .tzutil import get_zone
 from .upstox_api import UpstoxAPI, UpstoxError
 
 log = logging.getLogger(__name__)
@@ -71,7 +71,7 @@ def _run_series(pipeline_id: str, candles: list[Candle], params: IchimokuParams)
 
 
 def run_backtest(cfg: Config, api: UpstoxAPI, days: int) -> None:
-    tz = ZoneInfo(cfg.timezone)
+    tz = get_zone(cfg.timezone)
     params = IchimokuParams(cfg.tenkan, cfg.kijun, cfg.senkou_b, cfg.displacement)
     now = datetime.now(tz)
     to_date = now.strftime("%Y-%m-%d")

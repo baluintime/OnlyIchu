@@ -13,13 +13,13 @@ import os
 import threading
 import time as _time
 from datetime import datetime, timedelta
-from zoneinfo import ZoneInfo
 
 from flask import Flask, jsonify, render_template
 
 from .candles import Candle, TimeframeAggregator
 from .config import Config, IndexConfig
 from .ichimoku import IchimokuParams, compute_state, long_entry, short_entry
+from .tzutil import get_zone
 from .upstox_api import UpstoxAPI, UpstoxError
 
 log = logging.getLogger(__name__)
@@ -101,7 +101,7 @@ class DashboardService:
     def __init__(self, cfg: Config, api: UpstoxAPI):
         self.cfg = cfg
         self.api = api
-        self.tz = ZoneInfo(cfg.timezone)
+        self.tz = get_zone(cfg.timezone)
         self.params = IchimokuParams(cfg.tenkan, cfg.kijun, cfg.senkou_b, cfg.displacement)
         self.ttl = max(3.0, cfg.web_refresh_seconds / 2.0)
         self._lock = threading.Lock()

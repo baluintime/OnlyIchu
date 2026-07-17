@@ -18,7 +18,6 @@ from __future__ import annotations
 import logging
 import time as _time
 from datetime import datetime, time, timedelta
-from zoneinfo import ZoneInfo
 
 from .broker import BaseBroker, LiveBroker, PaperBroker
 from .candles import Candle, CandleSeries, TimeframeAggregator
@@ -26,6 +25,7 @@ from .config import Config, IndexConfig
 from .ichimoku import IchimokuParams
 from .options import OptionSelector
 from .strategy import ENTER_LONG, EXIT, Pipeline, Signal
+from .tzutil import get_zone
 from .upstox_api import UpstoxAPI, UpstoxError
 
 log = logging.getLogger(__name__)
@@ -50,7 +50,7 @@ class Engine:
     def __init__(self, cfg: Config, api: UpstoxAPI):
         self.cfg = cfg
         self.api = api
-        self.tz = ZoneInfo(cfg.timezone)
+        self.tz = get_zone(cfg.timezone)
         self.params = IchimokuParams(cfg.tenkan, cfg.kijun, cfg.senkou_b, cfg.displacement)
         self.selector = OptionSelector(api, cfg)
         self.broker: BaseBroker = (
