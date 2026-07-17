@@ -8,6 +8,7 @@ Run with:  python -m onlyichu web
 from __future__ import annotations
 
 import copy
+import csv
 import json
 import logging
 import os
@@ -15,7 +16,9 @@ import threading
 import time as _time
 from datetime import datetime, timedelta
 
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, jsonify, render_template, request, send_file
+
+from . import settings as settings_mod
 
 from .candles import Candle, TimeframeAggregator
 from .config import Config, IndexConfig
@@ -274,6 +277,19 @@ class DashboardService:
         }
 
 
+def read_trade_log(path: str, limit: int = 200) -> list[dict]:
+    """Last `limit` trades from a broker CSV log, newest first."""
+    if not os.path.exists(path):
+        return []
+    try:
+        with open(path, newline="", encoding="utf-8") as fh:
+            rows = list(csv.DictReader(fh))
+    except (OSError, csv.Error) as exc:
+        log.warning("could not read trade log %s: %s", path, exc)
+        return []
+    return rows[-limit:][::-1]
+
+
 class TradingController:
     """Starts/stops the trading Engine in a background thread, switchable
     between paper and live mode from the dashboard."""
@@ -386,7 +402,69 @@ def create_app(cfg: Config, api: UpstoxAPI, token: str | None = None) -> Flask:
     def api_dashboard():  # type: ignore[unused-variable]
         payload = dict(service.payload())
         payload["trading"] = controller.status()
+        payload["settings"] = {
+            "lots_per_trade": cfg.lots_per_trade,
+            "capital": cfg.paper_starting_cash,
+        }
         return jsonify(payload)
+
+    @app.post("/api/settings")
+    def api_settings():  # type: ignore[unused-variable]
+        body = request.get_json(silent=True) or {}
+        lots = body.get("lots_per_trade")
+        capital = body.get("capital")
+        err = settings_mod.validate(lots, capital)
+        if err:
+            return jsonify({"ok": False, "message": err}), 400
+        messages = []
+        if lots is not None:
+            cfg.lots_per_trade = int(lots)
+            engine = controller._engine
+            if controller.running and engine is not None:
+                engine.cfg.lots_per_trade = int(lots)
+            messages.append(f"lots per trade set to {int(lots)} (applies to new entries)")
+        if capital is not None:
+            if controller.running and controller.status().get("mode") == "paper":
+                return jsonify(
+                    {"ok": False, "message": "stop the paper engine before changing capital"}
+                ), 409
+            capital = float(capital)
+            cfg.paper_starting_cash = capital
+            # reset the paper account's free cash to the new capital
+            state = {}
+            if os.path.exists(cfg.paper_state_file):
+                try:
+                    with open(cfg.paper_state_file, encoding="utf-8") as fh:
+                        state = json.load(fh)
+                except (ValueError, OSError):
+                    state = {}
+            state["cash"] = capital
+            os.makedirs(os.path.dirname(cfg.paper_state_file) or ".", exist_ok=True)
+            with open(cfg.paper_state_file, "w", encoding="utf-8") as fh:
+                json.dump(state, fh, indent=2)
+            messages.append(f"paper capital set to ₹{capital:,.0f}")
+        settings_mod.save_overrides(cfg, lots=lots, capital=capital)
+        service._cached = None  # bust cache so the strip updates immediately
+        return jsonify({"ok": True, "message": "; ".join(messages) or "nothing to change"})
+
+    @app.get("/api/trades")
+    def api_trades():  # type: ignore[unused-variable]
+        mode = request.args.get("mode", "paper")
+        path = cfg.live_trade_log if mode == "live" else cfg.paper_trade_log
+        return jsonify({"mode": mode, "trades": read_trade_log(path)})
+
+    @app.get("/trades.csv")
+    def trades_csv():  # type: ignore[unused-variable]
+        mode = request.args.get("mode", "paper")
+        path = cfg.live_trade_log if mode == "live" else cfg.paper_trade_log
+        if not os.path.exists(path):
+            return jsonify({"ok": False, "message": f"no {mode} trades logged yet"}), 404
+        return send_file(
+            os.path.abspath(path),
+            as_attachment=True,
+            download_name=f"onlyichu_trades_{mode}_{datetime.now().strftime('%Y%m%d')}.csv",
+            mimetype="text/csv",
+        )
 
     @app.post("/api/trading/start")
     def trading_start():  # type: ignore[unused-variable]

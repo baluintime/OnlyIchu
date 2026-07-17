@@ -124,3 +124,64 @@ def test_invalid_mode_rejected(tmp_path):
     resp = client.post("/api/trading/start", json={"mode": "yolo"})
     assert resp.status_code == 409
     assert "unknown mode" in resp.get_json()["message"]
+
+
+def test_settings_apply_and_persist(tmp_path):
+    import json
+
+    cfg = make_cfg(tmp_path)
+    cfg.paper_trade_log = str(tmp_path / "trades_paper.csv")
+    app = create_app(cfg, FakeAPI())
+    client = app.test_client()
+
+    resp = client.post("/api/settings", json={"lots_per_trade": 3, "capital": 250000})
+    assert resp.status_code == 200 and resp.get_json()["ok"] is True
+    assert cfg.lots_per_trade == 3
+    assert cfg.paper_starting_cash == 250000.0
+    # paper state file cash was reset to the new capital
+    with open(cfg.paper_state_file) as fh:
+        assert json.load(fh)["cash"] == 250000.0
+    # settings echoed in the dashboard payload
+    body = client.get("/api/dashboard").get_json()
+    assert body["settings"] == {"lots_per_trade": 3, "capital": 250000.0}
+    # overrides persisted for the next start
+    with open(tmp_path / "settings.json") as fh:
+        saved = json.load(fh)
+    assert saved == {"lots_per_trade": 3, "capital": 250000.0}
+
+
+def test_settings_validation(tmp_path):
+    app = create_app(make_cfg(tmp_path), FakeAPI())
+    client = app.test_client()
+    assert client.post("/api/settings", json={"lots_per_trade": 0}).status_code == 400
+    assert client.post("/api/settings", json={"lots_per_trade": "x"}).status_code == 400
+    assert client.post("/api/settings", json={"capital": 5}).status_code == 400
+
+
+def test_trade_log_endpoints(tmp_path):
+    cfg = make_cfg(tmp_path)
+    cfg.paper_trade_log = str(tmp_path / "trades_paper.csv")
+    cfg.live_trade_log = str(tmp_path / "trades_live.csv")
+
+    from onlyichu.broker import PaperBroker
+
+    broker = PaperBroker(cfg, None)
+    broker.enter("NIFTY:1m", "NSE_FO|1", "NIFTY 25500 CE", 75, "LONG", 100.0)
+    broker.exit("NIFTY:1m", price_hint=110.0)
+
+    app = create_app(cfg, FakeAPI())
+    client = app.test_client()
+
+    body = client.get("/api/trades?mode=paper").get_json()
+    assert body["mode"] == "paper"
+    assert len(body["trades"]) == 2
+    assert body["trades"][0]["action"].startswith("EXIT")  # newest first
+    assert float(body["trades"][0]["pnl"]) > 0
+
+    dl = client.get("/trades.csv?mode=paper")
+    assert dl.status_code == 200
+    assert "attachment" in dl.headers.get("Content-Disposition", "")
+    assert b"NIFTY 25500 CE" in dl.data
+
+    assert client.get("/api/trades?mode=live").get_json()["trades"] == []
+    assert client.get("/trades.csv?mode=live").status_code == 404

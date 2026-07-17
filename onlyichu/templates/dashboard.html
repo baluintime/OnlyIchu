@@ -117,6 +117,49 @@
   .engine-status.on-live .dot { background: var(--red); animation: ping 1.1s ease-out infinite; }
   .ctrl-msg { width: 100%; font-size: 12px; color: var(--muted); display: none; }
   .ctrl-msg.show { display: block; }
+  .ctrl-sep { width: 1px; height: 26px; background: var(--card-border); }
+  .num { display: inline-flex; align-items: center; gap: 7px; }
+  .num span { font-size: 10.5px; letter-spacing: 1px; color: var(--muted); }
+  .num input {
+    width: 108px; padding: 7px 10px; border-radius: 10px; border: 1px solid var(--card-border);
+    background: rgba(0,0,0,.35); color: var(--text); font: 700 13px/1 inherit; outline: none;
+    transition: border-color .3s;
+  }
+  .num input:focus { border-color: var(--cyan); }
+  .num input.narrow { width: 62px; }
+
+  /* ---------------- trade log ---------------- */
+  .tlog {
+    margin-top: 22px; border-radius: 20px; padding: 18px;
+    background: linear-gradient(160deg, rgba(255,255,255,.05), rgba(255,255,255,.02));
+    border: 1px solid var(--card-border); backdrop-filter: blur(14px);
+    animation: rise .6s ease both;
+  }
+  .tlog-head { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 12px; }
+  .tlog-head h2 { font-size: 16px; letter-spacing: .6px; margin-right: 4px; }
+  .tlog-count { font-size: 12px; color: var(--muted); margin-left: auto; }
+  a.btn { text-decoration: none; display: inline-block; }
+  .tlog-wrap { max-height: 380px; overflow: auto; border-radius: 12px; border: 1px solid rgba(255,255,255,.06); }
+  .tlog table { width: 100%; border-collapse: collapse; font-size: 12.5px; min-width: 720px; }
+  .tlog thead th {
+    position: sticky; top: 0; z-index: 1; text-align: left; padding: 9px 12px;
+    font-size: 10.5px; letter-spacing: 1.1px; text-transform: uppercase; color: var(--muted);
+    background: var(--bg2); border-bottom: 1px solid var(--card-border);
+  }
+  .tlog tbody td { padding: 8px 12px; border-bottom: 1px solid rgba(255,255,255,.045);
+                   font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .tlog tbody tr { transition: background .3s; }
+  .tlog tbody tr:hover { background: rgba(56,189,248,.05); }
+  .tlog tbody tr.fresh { animation: freshRow 1.6s ease; }
+  @keyframes freshRow { 0% { background: rgba(56,189,248,.22); } 100% { background: transparent; } }
+  .tlog .pnl-pos { color: var(--green); font-weight: 700; }
+  .tlog .pnl-neg { color: var(--red); font-weight: 700; }
+  .tlog .act { font-weight: 700; letter-spacing: .5px; }
+  .tlog .act.ENTRY { color: var(--cyan); }
+  .tlog .dir-badge { padding: 2px 9px; border-radius: 999px; font-size: 10.5px; font-weight: 700; }
+  .tlog .dir-badge.LONG { color: var(--green); background: var(--green-soft); }
+  .tlog .dir-badge.SHORT { color: var(--red); background: var(--red-soft); }
+  .tlog-empty { padding: 26px; text-align: center; color: var(--muted); font-size: 13px; }
 
   /* modal */
   .modal { position: fixed; inset: 0; display: none; place-items: center; z-index: 50;
@@ -306,6 +349,10 @@
     </div>
     <button class="btn go" id="btnStart">▶ START</button>
     <button class="btn warn" id="btnSquare" style="display:none">SQUARE OFF ALL</button>
+    <span class="ctrl-sep"></span>
+    <label class="num"><span>LOTS</span><input id="inpLots" class="narrow" type="number" min="1" max="100" step="1"></label>
+    <label class="num"><span>CAPITAL ₹</span><input id="inpCapital" type="number" min="1000" step="10000"></label>
+    <button class="btn" id="btnApply">APPLY</button>
     <span class="engine-status" id="engineStatus"><span class="dot"></span><span id="engineText">ENGINE STOPPED</span></span>
     <div class="ctrl-msg" id="ctrlMsg"></div>
   </div>
@@ -324,6 +371,28 @@
     <div class="sk"></div><div class="sk"></div><div class="sk"></div>
   </div>
   <div class="grid" id="grid"></div>
+
+  <section class="tlog" id="tlog">
+    <div class="tlog-head">
+      <h2>📒 Trade Log</h2>
+      <div class="seg" id="segLog">
+        <button class="segbtn active" data-log="paper">PAPER</button>
+        <button class="segbtn" data-log="live">LIVE</button>
+      </div>
+      <a class="btn" id="btnDownload" href="/trades.csv?mode=paper">⬇ DOWNLOAD CSV</a>
+      <span class="tlog-count" id="tlogCount"></span>
+    </div>
+    <div class="tlog-wrap">
+      <table>
+        <thead><tr>
+          <th>Time</th><th>Pipeline</th><th>Action</th><th>Symbol</th>
+          <th>Dir</th><th>Qty</th><th>Price</th><th>PnL ₹</th>
+        </tr></thead>
+        <tbody id="tlogBody"></tbody>
+      </table>
+      <div class="tlog-empty" id="tlogEmpty" style="display:none">No trades logged yet.</div>
+    </div>
+  </section>
 
   <div class="modal" id="liveModal">
     <div class="modal-box">
@@ -639,6 +708,77 @@ $("mOk").addEventListener("click", () => {
   post("/api/trading/start", { mode: "live", confirm: "LIVE" });
 });
 
+/* ---------- settings (lots & capital) ---------- */
+function renderSettings(s) {
+  if (!s) return;
+  const lots = $("inpLots"), cap = $("inpCapital");
+  // don't clobber values the user is currently editing
+  if (document.activeElement !== lots && !lots.dataset.dirty) lots.value = s.lots_per_trade;
+  if (document.activeElement !== cap && !cap.dataset.dirty) cap.value = s.capital;
+}
+["inpLots", "inpCapital"].forEach((id) =>
+  $(id).addEventListener("input", (e) => { e.target.dataset.dirty = "1"; }));
+
+$("btnApply").addEventListener("click", async () => {
+  const lots = parseInt($("inpLots").value, 10);
+  const capital = parseFloat($("inpCapital").value);
+  if (!Number.isFinite(lots) || lots < 1) { ctrlMsg("lots must be a whole number ≥ 1", true); return; }
+  if (!Number.isFinite(capital) || capital < 1000) { ctrlMsg("capital must be at least ₹1,000", true); return; }
+  await post("/api/settings", { lots_per_trade: lots, capital: capital });
+  delete $("inpLots").dataset.dirty;
+  delete $("inpCapital").dataset.dirty;
+});
+
+/* ---------- trade log ---------- */
+let logMode = "paper";
+let lastTradeKey = { paper: "", live: "" };
+
+document.querySelectorAll("#segLog .segbtn").forEach((b) => {
+  b.addEventListener("click", () => {
+    logMode = b.dataset.log;
+    document.querySelectorAll("#segLog .segbtn").forEach((x) =>
+      x.classList.toggle("active", x.dataset.log === logMode));
+    $("btnDownload").href = "/trades.csv?mode=" + logMode;
+    lastTradeKey[logMode] = "";  // force full re-render with no flash
+    loadTrades();
+  });
+});
+
+async function loadTrades() {
+  try {
+    const resp = await fetch("/api/trades?mode=" + logMode, { cache: "no-store" });
+    const data = await resp.json();
+    if (data.mode !== logMode) return; // stale response after a tab switch
+    const trades = data.trades || [];
+    $("tlogCount").textContent = trades.length
+      ? trades.length + " trade" + (trades.length > 1 ? "s" : "") + " (latest first)"
+      : "";
+    $("tlogEmpty").style.display = trades.length ? "none" : "";
+    const body = $("tlogBody");
+    const newestKey = trades.length ? trades[0].time + trades[0].pipeline + trades[0].action : "";
+    const isNew = lastTradeKey[logMode] && newestKey && newestKey !== lastTradeKey[logMode];
+    body.innerHTML = "";
+    trades.forEach((t, i) => {
+      const pnl = parseFloat(t.pnl || "0");
+      const isEntry = (t.action || "").startsWith("ENTRY");
+      const tr = document.createElement("tr");
+      if (isNew && i === 0) tr.className = "fresh";
+      tr.innerHTML = `
+        <td>${(t.time || "").replace("T", " ")}</td>
+        <td>${t.pipeline || ""}</td>
+        <td class="act ${isEntry ? "ENTRY" : ""}">${t.action || ""}</td>
+        <td>${t.symbol || ""}</td>
+        <td><span class="dir-badge ${t.direction || ""}">${t.direction || ""}</span></td>
+        <td>${t.qty || ""}</td>
+        <td>${t.price ? fmt.format(parseFloat(t.price)) : ""}</td>
+        <td class="${isEntry ? "" : pnl > 0 ? "pnl-pos" : pnl < 0 ? "pnl-neg" : ""}">
+          ${isEntry ? "—" : (pnl >= 0 ? "+" : "") + fmt.format(pnl)}</td>`;
+      body.appendChild(tr);
+    });
+    lastTradeKey[logMode] = newestKey;
+  } catch (e) { /* transient — next poll retries */ }
+}
+
 /* ---------- polling ---------- */
 async function loadData() {
   const resp = await fetch("/api/dashboard", { cache: "no-store" });
@@ -660,6 +800,8 @@ async function loadData() {
   (data.indices || []).forEach(renderIndex);
   renderTrading(data.trading);
   renderAccount(data);
+  renderSettings(data.settings);
+  await loadTrades();
 }
 
 async function loop() {

@@ -59,7 +59,9 @@ def cmd_run(args: argparse.Namespace) -> None:
         if input("Type 'live' to confirm: ").strip().lower() != "live":
             raise SystemExit("Aborted.")
     from .keyresolver import resolve_index_keys
+    from .settings import apply_overrides
 
+    apply_overrides(cfg)
     resolve_index_keys(cfg.instruments)
     api = UpstoxAPI(auth.load_token())
     Engine(cfg, api).run()
@@ -74,6 +76,9 @@ def cmd_web(args: argparse.Namespace) -> None:
         cfg.web_host = args.host
     if args.port:
         cfg.web_port = args.port
+    from .settings import apply_overrides
+
+    apply_overrides(cfg)
     resolve_index_keys(cfg.instruments)
     token = auth.load_token()
     api = UpstoxAPI(token)

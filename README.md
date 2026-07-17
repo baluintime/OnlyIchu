@@ -106,6 +106,17 @@ every `web.refresh_seconds` (default 10s) with a countdown ring; values flash
 green/red as they change. Host/port/refresh are set under `web:` in
 `config.yaml` or via `--host/--port`.
 
+**Lot size & capital from the page:** the control bar has LOTS and CAPITAL ₹
+inputs with an APPLY button. Lots-per-trade takes effect on the next entry
+(even while the engine is running); capital resets the paper account's cash
+(engine must be stopped in paper mode first). Both persist across restarts in
+`state/settings.json`, overriding `config.yaml`.
+
+**Trade log:** a table at the bottom of the page shows every executed trade
+(newest first) with PAPER | LIVE tabs, auto-refreshing with the dashboard, and
+a DOWNLOAD CSV button that serves the full log as a file
+(`GET /trades.csv?mode=paper|live`).
+
 **Paper/live switching from the page:** the *Trading engine* bar has a
 PAPER | LIVE toggle plus START/STOP and SQUARE OFF ALL buttons. START in paper
 mode begins simulated trading immediately; switching the toggle to LIVE and
