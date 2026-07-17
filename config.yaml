@@ -85,7 +85,7 @@ instruments:
     enabled: true
     options_available: true
   - name: SMALLCAP
-    key: "NSE_INDEX|Nifty Smlcap 50"
+    key: "NSE_INDEX|NIFTY SMLCAP 50"
     enabled: true
     options_available: false
   - name: LARGECAP

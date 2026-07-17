@@ -58,11 +58,15 @@ def cmd_run(args: argparse.Namespace) -> None:
         print("LIVE mode places REAL orders with REAL money on your Upstox account.")
         if input("Type 'live' to confirm: ").strip().lower() != "live":
             raise SystemExit("Aborted.")
+    from .keyresolver import resolve_index_keys
+
+    resolve_index_keys(cfg.instruments)
     api = UpstoxAPI(auth.load_token())
     Engine(cfg, api).run()
 
 
 def cmd_web(args: argparse.Namespace) -> None:
+    from .keyresolver import resolve_index_keys
     from .web import run_web
 
     cfg = load_config(args.config)
@@ -70,14 +74,17 @@ def cmd_web(args: argparse.Namespace) -> None:
         cfg.web_host = args.host
     if args.port:
         cfg.web_port = args.port
+    resolve_index_keys(cfg.instruments)
     api = UpstoxAPI(auth.load_token())
     run_web(cfg, api)
 
 
 def cmd_backtest(args: argparse.Namespace) -> None:
     from .backtest import run_backtest
+    from .keyresolver import resolve_index_keys
 
     cfg = load_config(args.config)
+    resolve_index_keys(cfg.instruments)
     api = UpstoxAPI(auth.load_token())
     run_backtest(cfg, api, days=args.days)
 

@@ -57,16 +57,18 @@ python -m onlyichu login
 Opens an OAuth URL; after approving, paste the `code` query parameter back into the
 prompt. The access token is stored in `~/.onlyichu/credentials.json`.
 
-### Verify instrument keys (one-time)
+### Instrument keys are auto-validated
 
-Upstox index keys occasionally differ in casing. Confirm the smallcap/largecap keys:
+Upstox index keys are exact strings with inconsistent casing (e.g.
+`NSE_INDEX|Nifty 50` but `NSE_INDEX|NIFTY MID SELECT`). On startup, `run`, `web`
+and `backtest` download Upstox's public instrument master, validate every
+configured key, and auto-correct wrong ones by name match (a warning shows the
+corrected key to put in `config.yaml`). An unresolvable index is disabled with
+suggestions instead of erroring forever. To search keys manually:
 
 ```bash
 python -m onlyichu instruments --index-only --search "smlcap"
-python -m onlyichu instruments --index-only --search "nifty 100"
 ```
-
-and update `instruments:` in `config.yaml` if needed.
 
 ## Run
 

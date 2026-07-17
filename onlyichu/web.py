@@ -109,6 +109,9 @@ class DashboardService:
         self._cached_at = 0.0
         # historical candles are immutable — fetch once per (index, day)
         self._hist: dict[str, tuple[str, list[Candle]]] = {}
+        # failing indices are paused for a while instead of retried every poll
+        self.fail_cooldown = 300.0
+        self._failed: dict[str, tuple[float, str]] = {}
 
     # ------------------------------------------------------------- data
 
@@ -187,13 +190,25 @@ class DashboardService:
                 "pipelines": [],
                 "error": None,
             }
+            paused = self._failed.get(index.key)
+            if paused and _time.monotonic() - paused[0] < self.fail_cooldown:
+                entry["error"] = paused[1] + " (retry paused)"
+                indices_payload.append(entry)
+                error = error or "Some indices failed to load — see index cards."
+                continue
             try:
                 one_min = self._index_candles(index)
+                self._failed.pop(index.key, None)
             except UpstoxError as exc:
-                entry["error"] = str(exc)[:200]
-                log.warning("candle fetch failed for %s: %s", index.name, exc)
+                msg = str(exc)[:200]
+                self._failed[index.key] = (_time.monotonic(), msg)
+                entry["error"] = msg
+                log.warning(
+                    "candle fetch failed for %s (pausing retries for %.0fs): %s",
+                    index.name, self.fail_cooldown, exc,
+                )
                 indices_payload.append(entry)
-                error = error or "Some indices failed to load — check the access token."
+                error = error or "Some indices failed to load — see index cards."
                 continue
 
             today = now.date()
