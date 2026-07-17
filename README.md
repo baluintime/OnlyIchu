@@ -106,6 +106,15 @@ every `web.refresh_seconds` (default 10s) with a countdown ring; values flash
 green/red as they change. Host/port/refresh are set under `web:` in
 `config.yaml` or via `--host/--port`.
 
+**Per-index trade toggle:** each tradeable index card has a TRADE switch.
+Switched off, the index stays fully visible on the dashboard (Ichimoku levels
+and LONG/SHORT signals keep updating from real data) but the engine will not
+open positions for it — ideal for low capital where you trade a single index.
+Exits for already-open positions are always managed regardless of the toggle.
+Toggles apply instantly (even to a running engine), persist in
+`state/settings.json`, and can also be preset with `trade_enabled: false` per
+instrument in `config.yaml`.
+
 **Lot size & capital from the page:** the control bar has LOTS and CAPITAL ₹
 inputs with an APPLY button. Lots-per-trade takes effect on the next entry
 (even while the engine is running); capital resets the paper account's cash

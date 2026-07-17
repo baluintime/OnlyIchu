@@ -37,9 +37,18 @@ def apply_overrides(cfg: Config) -> None:
         cfg.lots_per_trade = int(data["lots_per_trade"])
     if "capital" in data:
         cfg.paper_starting_cash = float(data["capital"])
+    toggles = data.get("trade_enabled") or {}
+    for ix in cfg.instruments:
+        if ix.name in toggles:
+            ix.trade_enabled = bool(toggles[ix.name])
 
 
-def save_overrides(cfg: Config, lots: int | None = None, capital: float | None = None) -> None:
+def save_overrides(
+    cfg: Config,
+    lots: int | None = None,
+    capital: float | None = None,
+    trade_toggle: tuple[str, bool] | None = None,
+) -> None:
     path = settings_path(cfg)
     data: dict = {}
     if os.path.exists(path):
@@ -52,6 +61,9 @@ def save_overrides(cfg: Config, lots: int | None = None, capital: float | None =
         data["lots_per_trade"] = int(lots)
     if capital is not None:
         data["capital"] = float(capital)
+    if trade_toggle is not None:
+        name, enabled = trade_toggle
+        data.setdefault("trade_enabled", {})[name] = bool(enabled)
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     with open(path, "w", encoding="utf-8") as fh:
         json.dump(data, fh, indent=2)

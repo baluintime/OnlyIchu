@@ -206,6 +206,9 @@ class Engine:
         if not runner.index.options_available:
             log.info("%s: %s has no listed options — signal only, no trade placed", pid, runner.index.name)
             return
+        if not runner.index.trade_enabled:
+            log.info("%s: trading is toggled OFF for %s — signal only", pid, runner.index.name)
+            return
         sel = self.selector.select_itm(runner.index.key, direction, spot)
         if sel is None:
             log.warning("%s: no suitable ITM %s found; entry skipped", pid, "CALL" if direction == "LONG" else "PUT")

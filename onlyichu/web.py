@@ -188,6 +188,7 @@ class DashboardService:
                 "name": index.name,
                 "key": index.key,
                 "options_available": index.options_available,
+                "trade_enabled": index.trade_enabled,
                 "ltp": ltps.get(index.key),
                 "prev_close": None,
                 "change_pct": None,
@@ -446,6 +447,26 @@ def create_app(cfg: Config, api: UpstoxAPI, token: str | None = None) -> Flask:
         settings_mod.save_overrides(cfg, lots=lots, capital=capital)
         service._cached = None  # bust cache so the strip updates immediately
         return jsonify({"ok": True, "message": "; ".join(messages) or "nothing to change"})
+
+    @app.post("/api/index-toggle")
+    def api_index_toggle():  # type: ignore[unused-variable]
+        body = request.get_json(silent=True) or {}
+        name = str(body.get("name", ""))
+        enabled = bool(body.get("enabled", True))
+        # cfg.instruments objects are shared with any running engine (the
+        # engine start uses a shallow config copy), so this applies instantly
+        index = next((ix for ix in cfg.instruments if ix.name == name), None)
+        if index is None:
+            return jsonify({"ok": False, "message": f"unknown index {name!r}"}), 404
+        if not index.options_available and enabled:
+            return jsonify(
+                {"ok": False, "message": f"{name} has no listed options — it is always signal-only"}
+            ), 400
+        index.trade_enabled = enabled
+        settings_mod.save_overrides(cfg, trade_toggle=(name, enabled))
+        service._cached = None
+        state = "ON" if enabled else "OFF (signals still shown; open positions still managed)"
+        return jsonify({"ok": True, "message": f"trading for {name}: {state}"})
 
     @app.get("/api/trades")
     def api_trades():  # type: ignore[unused-variable]

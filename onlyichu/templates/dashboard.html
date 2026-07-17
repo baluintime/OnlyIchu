@@ -234,6 +234,24 @@
     color: var(--cyan); background: rgba(56,189,248,.1); border: 1px solid rgba(56,189,248,.3);
   }
   .chip.syn { color: var(--amber); background: var(--amber-soft); border-color: rgba(245,185,60,.35); }
+  .chip.off { color: var(--muted); background: rgba(255,255,255,.05); border-color: var(--card-border); }
+
+  /* trade on/off switch */
+  .switch { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; margin-top: 8px; user-select: none; }
+  .switch input { display: none; }
+  .switch .track {
+    width: 40px; height: 21px; border-radius: 999px; position: relative; flex: none;
+    background: rgba(255,255,255,.1); border: 1px solid var(--card-border);
+    transition: background .3s, border-color .3s, box-shadow .3s;
+  }
+  .switch .thumb {
+    position: absolute; top: 2px; left: 2px; width: 15px; height: 15px; border-radius: 50%;
+    background: var(--muted); transition: transform .25s cubic-bezier(.2,.7,.3,1.4), background .3s;
+  }
+  .switch input:checked + .track { background: rgba(34,197,94,.3); border-color: rgba(34,197,94,.55); box-shadow: 0 0 12px rgba(34,197,94,.25); }
+  .switch input:checked + .track .thumb { transform: translateX(19px); background: var(--green); }
+  .switch .sw-label { font-size: 10.5px; font-weight: 700; letter-spacing: 1px; color: var(--muted); transition: color .3s; }
+  .switch input:checked ~ .sw-label { color: var(--green); }
 
   .price { text-align: right; }
   .ltp { font-size: 24px; font-weight: 700; font-variant-numeric: tabular-nums; transition: color .3s; }
@@ -479,12 +497,20 @@ function buildCard(ix, order) {
   const card = el("div", "card");
   card.id = "card-" + ix.name;
   card.style.setProperty("--d", (order * 0.09) + "s");
+  const toggle = ix.options_available
+    ? `<label class="switch" title="Enable/disable placing trades for this index (signals always shown)">
+         <input type="checkbox" class="trade-toggle" data-index="${ix.name}">
+         <span class="track"><span class="thumb"></span></span>
+         <span class="sw-label">TRADE</span>
+       </label>`
+    : "";
   card.innerHTML = `
     <div class="card-head">
       <div>
         <h2>${ix.name}</h2>
         <div class="tagline">${ix.key}</div>
         <span class="chip ${ix.options_available ? "" : "syn"}">${ix.options_available ? "ITM options" : "signals only · no options listed"}</span>
+        ${toggle}
       </div>
       <div class="price">
         <div class="ltp">—</div>
@@ -493,6 +519,9 @@ function buildCard(ix, order) {
     </div>
     <div class="pipes"></div>
     <div class="idx-error" style="display:none"></div>`;
+  const tg = card.querySelector(".trade-toggle");
+  if (tg) tg.addEventListener("change", (e) =>
+    post("/api/index-toggle", { name: ix.name, enabled: e.target.checked }));
   return card;
 }
 
@@ -568,6 +597,9 @@ function renderIndex(ix, order) {
     chg.textContent = (ix.change_pct >= 0 ? "+" : "") + ix.change_pct.toFixed(2) + "%";
     chg.className = "chg " + (ix.change_pct > 0 ? "up" : ix.change_pct < 0 ? "down" : "flat");
   }
+
+  const tg = card.querySelector(".trade-toggle");
+  if (tg && document.activeElement !== tg) tg.checked = !!ix.trade_enabled;
 
   const err = card.querySelector(".idx-error");
   err.style.display = ix.error ? "block" : "none";

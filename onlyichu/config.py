@@ -14,8 +14,9 @@ import yaml
 class IndexConfig:
     name: str
     key: str
-    enabled: bool = True
-    options_available: bool = True
+    enabled: bool = True            # show on dashboard / compute signals
+    options_available: bool = True  # index has exchange-listed option contracts
+    trade_enabled: bool = True      # place trades on signals (toggle in the UI)
 
 
 @dataclass
@@ -138,6 +139,7 @@ def load_config(path: str = "config.yaml") -> Config:
             key=item["key"],
             enabled=bool(item.get("enabled", True)),
             options_available=bool(item.get("options_available", True)),
+            trade_enabled=bool(item.get("trade_enabled", True)),
         )
         for item in (raw.get("instruments") or [])
     ]

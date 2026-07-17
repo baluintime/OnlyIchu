@@ -158,6 +158,48 @@ def test_settings_validation(tmp_path):
     assert client.post("/api/settings", json={"capital": 5}).status_code == 400
 
 
+def test_index_trade_toggle(tmp_path):
+    import json
+
+    cfg = make_cfg(tmp_path)
+    cfg.instruments = [
+        IndexConfig(name="NIFTY", key="NSE_INDEX|Fake", options_available=True),
+        IndexConfig(name="SMALLCAP", key="NSE_INDEX|Fake2", options_available=False),
+    ]
+    app = create_app(cfg, FakeAPI())
+    client = app.test_client()
+
+    resp = client.post("/api/index-toggle", json={"name": "NIFTY", "enabled": False})
+    assert resp.status_code == 200 and resp.get_json()["ok"] is True
+    assert cfg.instruments[0].trade_enabled is False
+    body = client.get("/api/dashboard").get_json()
+    nifty = next(i for i in body["indices"] if i["name"] == "NIFTY")
+    assert nifty["trade_enabled"] is False
+    # persisted for next start
+    with open(tmp_path / "settings.json") as fh:
+        assert json.load(fh)["trade_enabled"] == {"NIFTY": False}
+
+    assert client.post("/api/index-toggle", json={"name": "NOPE", "enabled": True}).status_code == 404
+    # options-less index can never be trade-enabled
+    resp = client.post("/api/index-toggle", json={"name": "SMALLCAP", "enabled": True})
+    assert resp.status_code == 400
+
+
+def test_apply_overrides_restores_toggles(tmp_path):
+    import json
+
+    from onlyichu.settings import apply_overrides
+
+    cfg = make_cfg(tmp_path)
+    cfg.instruments = [IndexConfig(name="NIFTY", key="k"), IndexConfig(name="BANKNIFTY", key="k2")]
+    with open(tmp_path / "settings.json", "w") as fh:
+        json.dump({"lots_per_trade": 2, "trade_enabled": {"BANKNIFTY": False}}, fh)
+    apply_overrides(cfg)
+    assert cfg.lots_per_trade == 2
+    assert cfg.instruments[0].trade_enabled is True
+    assert cfg.instruments[1].trade_enabled is False
+
+
 def test_trade_log_endpoints(tmp_path):
     cfg = make_cfg(tmp_path)
     cfg.paper_trade_log = str(tmp_path / "trades_paper.csv")
