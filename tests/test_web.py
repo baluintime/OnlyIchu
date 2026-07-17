@@ -98,3 +98,29 @@ def test_flask_routes(tmp_path):
     assert api.status_code == 200
     body = api.get_json()
     assert body["indices"][0]["pipelines"][0]["signal"] == "LONG"
+    assert body["trading"]["running"] is False
+
+
+def test_live_start_requires_confirmation(tmp_path):
+    app = create_app(make_cfg(tmp_path), FakeAPI())
+    client = app.test_client()
+    resp = client.post("/api/trading/start", json={"mode": "live"})
+    assert resp.status_code == 400
+    assert resp.get_json()["ok"] is False
+
+
+def test_stop_when_not_running_is_conflict(tmp_path):
+    app = create_app(make_cfg(tmp_path), FakeAPI())
+    client = app.test_client()
+    resp = client.post("/api/trading/stop")
+    assert resp.status_code == 409
+    resp = client.post("/api/trading/squareoff")
+    assert resp.status_code == 409
+
+
+def test_invalid_mode_rejected(tmp_path):
+    app = create_app(make_cfg(tmp_path), FakeAPI())
+    client = app.test_client()
+    resp = client.post("/api/trading/start", json={"mode": "yolo"})
+    assert resp.status_code == 409
+    assert "unknown mode" in resp.get_json()["message"]

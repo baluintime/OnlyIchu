@@ -16,7 +16,7 @@ open of the subsequent candle, per the spec. Exits execute immediately.
 from __future__ import annotations
 
 import logging
-import time as _time
+import threading
 from datetime import datetime, time, timedelta
 
 from .broker import BaseBroker, LiveBroker, PaperBroker
@@ -59,6 +59,7 @@ class Engine:
         self.runners = [IndexRunner(ix, cfg, self.params) for ix in cfg.enabled_instruments]
         self.trades_today: dict[str, int] = {}
         self._squared_off = False
+        self._stop = threading.Event()
 
     # ------------------------------------------------------------ warmup
 
@@ -112,10 +113,14 @@ class Engine:
     def _between(self, t: time, start: time, end: time) -> bool:
         return start <= t <= end
 
-    def run(self) -> None:
+    def run(self, stop_event: threading.Event | None = None) -> None:
+        """Run until market close or until `stop_event` is set (e.g. from the
+        web dashboard). Stopping does NOT square off open positions."""
+        if stop_event is not None:
+            self._stop = stop_event
         log.info("engine starting in %s mode with %d indices", self.cfg.mode.upper(), len(self.runners))
         self.warmup()
-        while True:
+        while not self._stop.is_set():
             now = self._now()
             t = now.time()
             if t >= self.cfg.market_close:
@@ -126,14 +131,17 @@ class Engine:
                     datetime.combine(now.date(), self.cfg.market_open, self.tz) - now
                 ).total_seconds()
                 log.info("waiting %.0fs for market open", wait)
-                _time.sleep(min(wait + 1, 300))
+                self._stop.wait(min(wait + 1, 300))
                 continue
             if t >= self.cfg.square_off and not self._squared_off:
                 self.square_off_all("square-off time")
                 self._squared_off = True
             self.poll_once()
-            _time.sleep(self.cfg.poll_interval_seconds)
-        # end of session: make sure nothing is left open
+            self._stop.wait(self.cfg.poll_interval_seconds)
+        if self._stop.is_set():
+            log.info("engine stopped on request (open positions are left untouched)")
+            return
+        # natural end of session: make sure nothing is left open
         if not self._squared_off and self.broker.open_positions():
             self.square_off_all("session end")
 
@@ -177,11 +185,7 @@ class Engine:
     def _execute(self, runner: IndexRunner, signal: Signal) -> None:
         pid = signal.pipeline_id
         if signal.action == EXIT:
-            hint = None
-            pos = self.broker.position(pid)
-            if pos is not None and pos.kind == "SYNTHETIC":
-                hint = signal.candle.close
-            self.broker.exit(pid, price_hint=hint, note="signal")
+            self.broker.exit(pid, price_hint=None, note="signal")
             return
 
         # entries
@@ -199,29 +203,20 @@ class Engine:
         direction = "LONG" if signal.action == ENTER_LONG else "SHORT"
         spot = signal.candle.close
 
-        if runner.index.options_available:
-            sel = self.selector.select_itm(runner.index.key, direction, spot)
-            if sel is None:
-                log.warning("%s: no suitable ITM %s found; entry skipped", pid, "CALL" if direction == "LONG" else "PUT")
-                return
-            qty = sel.lot_size * self.cfg.lots_per_trade
-            log.info(
-                "%s %s -> BUY %s x%d (strike %.0f, delta %s, exp %s)",
-                pid, direction, sel.trading_symbol, qty, sel.strike,
-                f"{sel.delta:.2f}" if sel.delta is not None else "n/a", sel.expiry,
-            )
-            pos = self.broker.enter(
-                pid, sel.instrument_key, sel.trading_symbol, qty, direction, sel.ltp, kind="OPTION"
-            )
-        else:
-            if self.cfg.mode == "live":
-                log.warning("%s: %s has no listed options; live entry skipped", pid, runner.index.name)
-                return
-            qty = self.cfg.lots_per_trade
-            log.info("%s %s -> SYNTHETIC index position x%d @ ~%.2f (no options listed)", pid, direction, qty, spot)
-            pos = self.broker.enter(
-                pid, runner.index.key, runner.index.name, qty, direction, spot, kind="SYNTHETIC"
-            )
+        if not runner.index.options_available:
+            log.info("%s: %s has no listed options — signal only, no trade placed", pid, runner.index.name)
+            return
+        sel = self.selector.select_itm(runner.index.key, direction, spot)
+        if sel is None:
+            log.warning("%s: no suitable ITM %s found; entry skipped", pid, "CALL" if direction == "LONG" else "PUT")
+            return
+        qty = sel.lot_size * self.cfg.lots_per_trade
+        log.info(
+            "%s %s -> BUY %s x%d (strike %.0f, delta %s, exp %s)",
+            pid, direction, sel.trading_symbol, qty, sel.strike,
+            f"{sel.delta:.2f}" if sel.delta is not None else "n/a", sel.expiry,
+        )
+        pos = self.broker.enter(pid, sel.instrument_key, sel.trading_symbol, qty, direction, sel.ltp)
         if pos is not None:
             self.trades_today[pid] = self.trades_today.get(pid, 0) + 1
 

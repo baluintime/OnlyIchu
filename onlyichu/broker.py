@@ -4,8 +4,8 @@
 Both brokers hold at most one position per pipeline and log every fill to a
 CSV trade log. In both directions the strategy only ever BUYS options
 (calls for longs, puts for shorts), so "exit" always means selling what we
-hold. Paper mode can additionally hold synthetic index positions for
-indices that have no exchange-traded options.
+hold. Only real exchange-listed contracts are traded — indices with no
+options are signal-only and never reach the broker.
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ import json
 import logging
 import os
 import time as _time
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 from datetime import datetime
 
 from .config import Config
@@ -38,12 +38,9 @@ class Position:
     qty: int
     entry_price: float
     entry_time: str
-    direction: str  # "LONG" | "SHORT" (underlying view)
-    kind: str  # "OPTION" (long premium) | "SYNTHETIC" (index-level, paper only)
+    direction: str  # "LONG" | "SHORT" (underlying view; the option is always bought)
 
     def pnl(self, exit_price: float) -> float:
-        if self.kind == "SYNTHETIC" and self.direction == "SHORT":
-            return (self.entry_price - exit_price) * self.qty
         return (exit_price - self.entry_price) * self.qty
 
 
@@ -84,12 +81,11 @@ class BaseBroker:
         qty: int,
         direction: str,
         price_hint: float | None,
-        kind: str = "OPTION",
     ) -> Position | None:
         if pipeline_id in self.state.positions:
             log.warning("%s already holds a position; entry skipped", pipeline_id)
             return None
-        fill = self._fill_buy(instrument_key, qty, price_hint, kind)
+        fill = self._fill_buy(instrument_key, qty, price_hint)
         if fill is None:
             return None
         pos = Position(
@@ -100,7 +96,6 @@ class BaseBroker:
             entry_price=fill,
             entry_time=datetime.now().isoformat(timespec="seconds"),
             direction=direction,
-            kind=kind,
         )
         self.state.positions[pipeline_id] = pos
         self._log_trade("ENTRY", pos, fill, 0.0)
@@ -129,9 +124,7 @@ class BaseBroker:
 
     # -- hooks ----------------------------------------------------------
 
-    def _fill_buy(
-        self, instrument_key: str, qty: int, price_hint: float | None, kind: str
-    ) -> float | None:
+    def _fill_buy(self, instrument_key: str, qty: int, price_hint: float | None) -> float | None:
         raise NotImplementedError
 
     def _fill_sell(self, pos: Position, price_hint: float | None) -> float | None:
@@ -154,12 +147,12 @@ class BaseBroker:
             writer = csv.writer(fh)
             if new_file:
                 writer.writerow(
-                    ["time", "pipeline", "action", "kind", "symbol", "instrument_key",
+                    ["time", "pipeline", "action", "symbol", "instrument_key",
                      "direction", "qty", "price", "pnl"]
                 )
             writer.writerow(
                 [datetime.now().isoformat(timespec="seconds"), pos.pipeline_id, action,
-                 pos.kind, pos.symbol, pos.instrument_key, pos.direction, pos.qty,
+                 pos.symbol, pos.instrument_key, pos.direction, pos.qty,
                  f"{price:.2f}", f"{pnl:.2f}"]
             )
 
@@ -185,18 +178,17 @@ class PaperBroker(BaseBroker):
                 log.warning("LTP fetch failed for %s: %s", instrument_key, exc)
         return price_hint
 
-    def _fill_buy(self, instrument_key, qty, price_hint, kind):
+    def _fill_buy(self, instrument_key, qty, price_hint):
         price = self._quote(instrument_key, price_hint)
         if price is None:
             log.error("paper buy skipped: no price for %s", instrument_key)
             return None
         fill = _round_tick(price * (1 + self.cfg.paper_slippage_pct / 100.0))
-        if kind == "OPTION":
-            cost = fill * qty
-            if cost > self.state.cash:
-                log.error("paper buy skipped: cost %.2f exceeds cash %.2f", cost, self.state.cash)
-                return None
-            self.state.cash -= cost
+        cost = fill * qty
+        if cost > self.state.cash:
+            log.error("paper buy skipped: cost %.2f exceeds cash %.2f", cost, self.state.cash)
+            return None
+        self.state.cash -= cost
         return fill
 
     def _fill_sell(self, pos, price_hint):
@@ -205,10 +197,7 @@ class PaperBroker(BaseBroker):
             log.error("paper sell has no live price for %s; using entry price", pos.instrument_key)
             price = pos.entry_price
         fill = _round_tick(price * (1 - self.cfg.paper_slippage_pct / 100.0))
-        if pos.kind == "OPTION":
-            self.state.cash += fill * pos.qty
-        else:
-            self.state.cash += pos.pnl(fill)
+        self.state.cash += fill * pos.qty
         return fill
 
     # -- persistence ------------------------------------------------------
@@ -233,8 +222,10 @@ class PaperBroker(BaseBroker):
             self.state.cash = float(payload.get("cash", self.state.cash))
             self.state.realized_pnl_today = float(payload.get("realized_pnl_today", 0.0))
             self.state.pnl_date = payload.get("pnl_date", self.state.pnl_date)
+            known = {f.name for f in fields(Position)}
             self.state.positions = {
-                k: Position(**v) for k, v in (payload.get("positions") or {}).items()
+                k: Position(**{a: b for a, b in v.items() if a in known})
+                for k, v in (payload.get("positions") or {}).items()
             }
             if self.state.positions:
                 log.info("resumed %d open paper position(s)", len(self.state.positions))
@@ -320,10 +311,7 @@ class LiveBroker(BaseBroker):
             log.error("market retry %s not confirmed — check the order book manually", order_id)
         return None
 
-    def _fill_buy(self, instrument_key, qty, price_hint, kind):
-        if kind != "OPTION":
-            log.warning("live mode cannot trade synthetic index positions; skipped %s", instrument_key)
-            return None
+    def _fill_buy(self, instrument_key, qty, price_hint):
         ltp = price_hint
         try:
             ltp = self.api.ltp_single(instrument_key) or price_hint

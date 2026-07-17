@@ -75,8 +75,9 @@ def cmd_web(args: argparse.Namespace) -> None:
     if args.port:
         cfg.web_port = args.port
     resolve_index_keys(cfg.instruments)
-    api = UpstoxAPI(auth.load_token())
-    run_web(cfg, api)
+    token = auth.load_token()
+    api = UpstoxAPI(token)
+    run_web(cfg, api, token)
 
 
 def cmd_backtest(args: argparse.Namespace) -> None:

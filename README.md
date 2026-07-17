@@ -32,11 +32,11 @@ Implements the multi-timeframe execution protocol from
 | LARGECAP | Nifty 100 | **none listed on NSE** |
 
 > NSE only lists index options on Nifty, Bank Nifty, FinNifty, Midcap Select (and
-> Nifty Next 50). Smallcap/largecap indices have **no option contracts**, so those
-> two are traded **synthetically at index level in paper mode only** (signal
-> tracking / PnL in index points) and are skipped in live mode. The engine also
-> auto-detects contract availability at runtime, so if the exchange lists new
-> contracts they will be picked up. Everything is configurable in `config.yaml`.
+> Nifty Next 50). Smallcap/largecap indices have **no option contracts**, so they
+> are **signal-only**: their Ichimoku state and breakout signals are computed from
+> real market data and shown on the dashboard, but no trade is ever placed for
+> them (in either mode). Only real exchange-listed contracts are traded.
+> Everything is configurable in `config.yaml`.
 
 ## Setup
 
@@ -101,10 +101,19 @@ for every index on both the 1m and 5m timeframes, and shows per pipeline the
 live signal (LONG / SHORT / NEUTRAL with glow animations), price position vs
 each of the four levels (▲/▼ with distance % and meter bars), the Kumo
 boundaries and bull/bear state, LTP with day change, market status, and the
-paper account strip (cash, PnL, open positions). The browser polls
-`/api/dashboard` every `web.refresh_seconds` (default 10s) with a countdown
-ring; values flash green/red as they change. Host/port/refresh are set under
-`web:` in `config.yaml` or via `--host/--port`.
+account strip (cash, PnL, open positions). The browser polls `/api/dashboard`
+every `web.refresh_seconds` (default 10s) with a countdown ring; values flash
+green/red as they change. Host/port/refresh are set under `web:` in
+`config.yaml` or via `--host/--port`.
+
+**Paper/live switching from the page:** the *Trading engine* bar has a
+PAPER | LIVE toggle plus START/STOP and SQUARE OFF ALL buttons. START in paper
+mode begins simulated trading immediately; switching the toggle to LIVE and
+pressing START opens a confirmation dialog where you must type `LIVE` — only
+then are real orders enabled. To change mode while running, STOP first (open
+positions are left untouched), pick the other mode, and START again. The
+status pill shows which engine is running; the strip below mirrors the running
+engine's positions and realized PnL.
 
 ### Other commands
 

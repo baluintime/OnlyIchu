@@ -81,6 +81,62 @@
   .ring::before { content: ""; position: absolute; inset: 4px; border-radius: 50%; background: var(--bg1); }
   .ring span { position: relative; font-size: 11px; font-variant-numeric: tabular-nums; color: var(--text); }
 
+  /* ---------------- engine control bar ---------------- */
+  .ctrl {
+    margin-top: 14px; padding: 11px 16px; border-radius: 16px;
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+    background: linear-gradient(120deg, rgba(255,255,255,.05), rgba(255,255,255,.02));
+    border: 1px solid var(--card-border); backdrop-filter: blur(12px);
+    animation: fadeDown .55s ease both;
+  }
+  .ctrl-label { font-size: 11px; letter-spacing: 1px; color: var(--muted); text-transform: uppercase; }
+  .seg { display: inline-flex; border-radius: 999px; padding: 3px; background: rgba(0,0,0,.35); border: 1px solid var(--card-border); }
+  .segbtn {
+    border: 0; cursor: pointer; padding: 6px 18px; border-radius: 999px; font: 700 12px/1 inherit;
+    letter-spacing: 1.2px; color: var(--muted); background: transparent; transition: all .25s;
+  }
+  .segbtn.active[data-mode="paper"] { background: rgba(56,189,248,.2); color: var(--cyan); box-shadow: 0 0 14px rgba(56,189,248,.25); }
+  .segbtn.active[data-mode="live"]  { background: rgba(244,64,95,.22); color: var(--red); box-shadow: 0 0 14px rgba(244,64,95,.3); }
+  .btn {
+    border: 1px solid var(--card-border); cursor: pointer; padding: 8px 18px; border-radius: 12px;
+    font: 700 12.5px/1 inherit; letter-spacing: 1px; color: var(--text); background: rgba(255,255,255,.06);
+    transition: transform .15s, box-shadow .3s, background .3s;
+  }
+  .btn:hover { transform: translateY(-1px); }
+  .btn:disabled { opacity: .45; cursor: not-allowed; transform: none; }
+  .btn.go { background: var(--green-soft); border-color: rgba(34,197,94,.45); color: var(--green); }
+  .btn.go:hover { box-shadow: 0 0 16px rgba(34,197,94,.3); }
+  .btn.halt { background: var(--red-soft); border-color: rgba(244,64,95,.45); color: var(--red); }
+  .btn.warn { background: var(--amber-soft); border-color: rgba(245,185,60,.4); color: var(--amber); }
+  .engine-status { display: inline-flex; align-items: center; gap: 8px; margin-left: auto;
+                   font-size: 12.5px; font-weight: 700; letter-spacing: .8px; color: var(--muted); }
+  .engine-status .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--faint); }
+  .engine-status.on-paper { color: var(--cyan); }
+  .engine-status.on-paper .dot { background: var(--cyan); animation: ping 1.6s ease-out infinite; }
+  .engine-status.on-live { color: var(--red); }
+  .engine-status.on-live .dot { background: var(--red); animation: ping 1.1s ease-out infinite; }
+  .ctrl-msg { width: 100%; font-size: 12px; color: var(--muted); display: none; }
+  .ctrl-msg.show { display: block; }
+
+  /* modal */
+  .modal { position: fixed; inset: 0; display: none; place-items: center; z-index: 50;
+           background: rgba(3,6,14,.72); backdrop-filter: blur(6px); }
+  .modal.show { display: grid; }
+  .modal-box {
+    width: min(420px, 92vw); padding: 24px; border-radius: 18px;
+    background: var(--bg1); border: 1px solid rgba(244,64,95,.4);
+    box-shadow: 0 0 60px rgba(244,64,95,.15); animation: rise .3s ease both;
+  }
+  .modal-box h3 { color: var(--red); margin-bottom: 10px; letter-spacing: .5px; }
+  .modal-box p { font-size: 13.5px; color: var(--muted); margin-bottom: 14px; }
+  .modal-box input {
+    width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--card-border);
+    background: rgba(0,0,0,.4); color: var(--text); font: 700 14px/1 inherit; letter-spacing: 2px;
+    text-align: center; outline: none;
+  }
+  .modal-box input:focus { border-color: var(--red); }
+  .modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 16px; }
+
   /* ---------------- banners & strips ---------------- */
   .banner {
     margin-top: 14px; padding: 12px 18px; border-radius: 14px; font-size: 14px;
@@ -242,10 +298,22 @@
     </div>
   </header>
 
+  <div class="ctrl">
+    <span class="ctrl-label">Trading engine</span>
+    <div class="seg" id="segMode">
+      <button class="segbtn active" data-mode="paper">PAPER</button>
+      <button class="segbtn" data-mode="live">LIVE</button>
+    </div>
+    <button class="btn go" id="btnStart">▶ START</button>
+    <button class="btn warn" id="btnSquare" style="display:none">SQUARE OFF ALL</button>
+    <span class="engine-status" id="engineStatus"><span class="dot"></span><span id="engineText">ENGINE STOPPED</span></span>
+    <div class="ctrl-msg" id="ctrlMsg"></div>
+  </div>
+
   <div class="banner" id="banner"></div>
 
   <div class="paper" id="paperStrip">
-    <div class="kv"><small>Paper cash</small><b id="paperCash">—</b></div>
+    <div class="kv"><small id="cashLabel">Paper cash</small><b id="paperCash">—</b></div>
     <div class="kv"><small>Realized PnL <span id="paperDate"></span></small><b id="paperPnl">—</b></div>
     <div class="kv"><small>Open positions</small><b id="paperCount">0</b></div>
     <div id="paperPositions" style="display:flex;gap:8px;flex-wrap:wrap"></div>
@@ -256,6 +324,19 @@
     <div class="sk"></div><div class="sk"></div><div class="sk"></div>
   </div>
   <div class="grid" id="grid"></div>
+
+  <div class="modal" id="liveModal">
+    <div class="modal-box">
+      <h3>⚠ Enable LIVE trading?</h3>
+      <p>The engine will place <b>real orders with real money</b> on your Upstox account
+         whenever a signal fires. Type <b>LIVE</b> below to confirm.</p>
+      <input id="liveConfirm" maxlength="4" autocomplete="off" placeholder="type LIVE">
+      <div class="modal-actions">
+        <button class="btn" id="mCancel">Cancel</button>
+        <button class="btn halt" id="mOk" disabled>Start LIVE engine</button>
+      </div>
+    </div>
+  </div>
 
   <footer>
     Signals are evaluated strictly on completed candle closes · LONG = close above all Ichimoku levels (buy ITM call)
@@ -334,7 +415,7 @@ function buildCard(ix, order) {
       <div>
         <h2>${ix.name}</h2>
         <div class="tagline">${ix.key}</div>
-        <span class="chip ${ix.options_available ? "" : "syn"}">${ix.options_available ? "ITM options" : "synthetic · no options"}</span>
+        <span class="chip ${ix.options_available ? "" : "syn"}">${ix.options_available ? "ITM options" : "signals only · no options listed"}</span>
       </div>
       <div class="price">
         <div class="ltp">—</div>
@@ -432,56 +513,168 @@ function renderIndex(ix, order) {
   });
 }
 
-function renderPaper(paper) {
+function renderAccount(data) {
   const strip = $("paperStrip");
-  if (!paper) { strip.classList.remove("show"); return; }
+  const t = data.trading;
+  // while the engine runs, the strip mirrors the running broker; otherwise
+  // it falls back to the persisted paper account state
+  let label, cash, pnl, pnlDate, positions;
+  if (t && t.running) {
+    label = t.mode === "live" ? "Live engine" : "Paper cash";
+    cash = t.cash;
+    pnl = t.realized_pnl_today ?? 0;
+    pnlDate = "today";
+    positions = t.positions || [];
+  } else if (data.paper) {
+    label = "Paper cash";
+    cash = data.paper.cash;
+    pnl = data.paper.realized_pnl_today ?? 0;
+    pnlDate = data.paper.pnl_date || "";
+    positions = data.paper.positions || [];
+  } else {
+    strip.classList.remove("show");
+    return;
+  }
   strip.classList.add("show");
-  setText($("paperCash"), "₹ " + fmt.format(paper.cash ?? 0), true);
-  const pnl = paper.realized_pnl_today ?? 0;
+  $("cashLabel").textContent = label;
+  setText($("paperCash"), cash != null ? "₹ " + fmt.format(cash) : "—", true);
   const pnlEl = $("paperPnl");
   setText(pnlEl, (pnl >= 0 ? "+₹ " : "-₹ ") + fmt.format(Math.abs(pnl)), true);
   pnlEl.style.color = pnl > 0 ? "var(--green)" : pnl < 0 ? "var(--red)" : "var(--text)";
-  $("paperDate").textContent = paper.pnl_date ? "(" + paper.pnl_date + ")" : "";
-  setText($("paperCount"), String((paper.positions || []).length));
+  $("paperDate").textContent = pnlDate ? "(" + pnlDate + ")" : "";
+  setText($("paperCount"), String(positions.length));
   const box = $("paperPositions");
   box.innerHTML = "";
-  (paper.positions || []).forEach((pos) => {
+  positions.forEach((pos) => {
     box.appendChild(el("span", "pos-chip " + pos.direction,
       `${pos.pipeline} · ${pos.symbol} × ${pos.qty} @ ${fmt.format(pos.entry_price)}`));
   });
 }
 
-/* ---------- polling ---------- */
-async function refresh() {
+/* ---------- engine controls ---------- */
+let desiredMode = "paper";
+let trading = { running: false, mode: null };
+
+function ctrlMsg(text, isError) {
+  const m = $("ctrlMsg");
+  m.textContent = text || "";
+  m.className = "ctrl-msg" + (text ? " show" : "");
+  m.style.color = isError ? "var(--red)" : "var(--muted)";
+}
+
+function renderTrading(t) {
+  trading = t || { running: false };
+  const status = $("engineStatus");
+  const btn = $("btnStart");
+  if (trading.running) {
+    status.className = "engine-status on-" + trading.mode;
+    $("engineText").textContent = "ENGINE RUNNING · " + trading.mode.toUpperCase() +
+      (trading.started_at ? " · since " + trading.started_at : "");
+    btn.textContent = "■ STOP";
+    btn.className = "btn halt";
+    desiredMode = trading.mode;
+  } else {
+    status.className = "engine-status";
+    $("engineText").textContent = "ENGINE STOPPED";
+    btn.textContent = "▶ START";
+    btn.className = "btn go";
+  }
+  document.querySelectorAll(".segbtn").forEach((b) =>
+    b.classList.toggle("active", b.dataset.mode === desiredMode));
+  const hasPositions = (trading.positions || []).length > 0;
+  $("btnSquare").style.display = trading.running && hasPositions ? "" : "none";
+  if (trading.last_error) ctrlMsg("engine error: " + trading.last_error, true);
+}
+
+async function post(url, body) {
   try {
-    const resp = await fetch("/api/dashboard", { cache: "no-store" });
+    const resp = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body || {}),
+    });
     const data = await resp.json();
-    $("skeleton").style.display = "none";
+    ctrlMsg(data.message, !data.ok);
+  } catch (e) {
+    ctrlMsg("request failed: " + e.message, true);
+  }
+  await loadData();
+}
 
-    const pill = $("marketPill");
-    const status = (data.market && data.market.status) || "…";
-    $("marketText").textContent = "MARKET " + status + " · " + (data.market ? data.market.session : "");
-    pill.className = "pill " + (status === "OPEN" ? "open" : status === "PRE-OPEN" ? "preopen" : "closed");
+document.querySelectorAll(".segbtn").forEach((b) => {
+  b.addEventListener("click", () => {
+    const mode = b.dataset.mode;
+    if (trading.running && mode !== trading.mode) {
+      ctrlMsg("Stop the engine first, then start it in " + mode.toUpperCase() + " mode.");
+      return;
+    }
+    desiredMode = mode;
+    document.querySelectorAll(".segbtn").forEach((x) =>
+      x.classList.toggle("active", x.dataset.mode === desiredMode));
+  });
+});
 
-    $("strategyMeta").textContent =
-      "Ichimoku " + data.strategy.params + " · " + data.strategy.timeframes.join(" & ") + " · updated " + data.generated_at;
+$("btnStart").addEventListener("click", () => {
+  if (trading.running) { post("/api/trading/stop"); return; }
+  if (desiredMode === "live") {
+    $("liveConfirm").value = "";
+    $("mOk").disabled = true;
+    $("liveModal").classList.add("show");
+    $("liveConfirm").focus();
+  } else {
+    post("/api/trading/start", { mode: "paper" });
+  }
+});
 
-    const banner = $("banner");
-    banner.className = "banner" + (data.error ? " show" : "");
-    if (data.error) banner.textContent = "⚠ " + data.error;
+$("btnSquare").addEventListener("click", () => {
+  if (confirm("Close ALL open positions now?")) post("/api/trading/squareoff");
+});
 
-    (data.indices || []).forEach(renderIndex);
-    renderPaper(data.paper);
+$("liveConfirm").addEventListener("input", (e) => {
+  $("mOk").disabled = e.target.value.trim() !== "LIVE";
+});
+$("mCancel").addEventListener("click", () => $("liveModal").classList.remove("show"));
+$("mOk").addEventListener("click", () => {
+  $("liveModal").classList.remove("show");
+  post("/api/trading/start", { mode: "live", confirm: "LIVE" });
+});
+
+/* ---------- polling ---------- */
+async function loadData() {
+  const resp = await fetch("/api/dashboard", { cache: "no-store" });
+  const data = await resp.json();
+  $("skeleton").style.display = "none";
+
+  const pill = $("marketPill");
+  const status = (data.market && data.market.status) || "…";
+  $("marketText").textContent = "MARKET " + status + " · " + (data.market ? data.market.session : "");
+  pill.className = "pill " + (status === "OPEN" ? "open" : status === "PRE-OPEN" ? "preopen" : "closed");
+
+  $("strategyMeta").textContent =
+    "Ichimoku " + data.strategy.params + " · " + data.strategy.timeframes.join(" & ") + " · updated " + data.generated_at;
+
+  const banner = $("banner");
+  banner.className = "banner" + (data.error ? " show" : "");
+  if (data.error) banner.textContent = "⚠ " + data.error;
+
+  (data.indices || []).forEach(renderIndex);
+  renderTrading(data.trading);
+  renderAccount(data);
+}
+
+async function loop() {
+  try {
+    await loadData();
   } catch (e) {
     const banner = $("banner");
     banner.className = "banner show";
     banner.textContent = "⚠ Dashboard server unreachable — retrying… (" + e.message + ")";
   } finally {
     nextFetchAt = performance.now() + REFRESH_S * 1000;
-    setTimeout(refresh, REFRESH_S * 1000);
+    setTimeout(loop, REFRESH_S * 1000);
   }
 }
-refresh();
+loop();
 </script>
 </body>
 </html>

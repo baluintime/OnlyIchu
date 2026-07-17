@@ -7,6 +7,7 @@ Run with:  python -m onlyichu web
 
 from __future__ import annotations
 
+import copy
 import json
 import logging
 import os
@@ -14,7 +15,7 @@ import threading
 import time as _time
 from datetime import datetime, timedelta
 
-from flask import Flask, jsonify, render_template
+from flask import Flask, jsonify, render_template, request
 
 from .candles import Candle, TimeframeAggregator
 from .config import Config, IndexConfig
@@ -273,9 +274,109 @@ class DashboardService:
         }
 
 
-def create_app(cfg: Config, api: UpstoxAPI) -> Flask:
+class TradingController:
+    """Starts/stops the trading Engine in a background thread, switchable
+    between paper and live mode from the dashboard."""
+
+    def __init__(self, cfg: Config, api: UpstoxAPI, token: str | None = None):
+        self.base_cfg = cfg
+        self.api = api
+        self.token = token
+        self._lock = threading.Lock()
+        self._engine = None
+        self._thread: threading.Thread | None = None
+        self._stop: threading.Event | None = None
+        self.last_error: str | None = None
+        self.started_at: str | None = None
+
+    @property
+    def running(self) -> bool:
+        return self._thread is not None and self._thread.is_alive()
+
+    def start(self, mode: str) -> tuple[bool, str]:
+        from .engine import Engine
+
+        with self._lock:
+            if self.running:
+                return False, "engine is already running — stop it first"
+            if mode not in ("paper", "live"):
+                return False, f"unknown mode {mode!r}"
+            cfg = copy.copy(self.base_cfg)
+            cfg.mode = mode
+            api = UpstoxAPI(self.token) if self.token else self.api
+            try:
+                engine = Engine(cfg, api)
+            except Exception as exc:  # noqa: BLE001
+                self.last_error = f"{type(exc).__name__}: {exc}"
+                return False, self.last_error
+            stop = threading.Event()
+
+            def _run() -> None:
+                try:
+                    engine.run(stop)
+                except Exception as exc:  # noqa: BLE001
+                    self.last_error = f"{type(exc).__name__}: {exc}"
+                    log.exception("engine crashed")
+
+            self.last_error = None
+            self._engine = engine
+            self._stop = stop
+            self._thread = threading.Thread(target=_run, daemon=True, name=f"engine-{mode}")
+            self.started_at = datetime.now().strftime("%H:%M:%S")
+            self._thread.start()
+            log.info("engine started from dashboard in %s mode", mode.upper())
+            return True, f"{mode.upper()} engine started"
+
+    def stop(self) -> tuple[bool, str]:
+        with self._lock:
+            if not self.running:
+                return False, "engine is not running"
+            assert self._stop is not None and self._thread is not None
+            self._stop.set()
+            self._thread.join(timeout=15)
+            log.info("engine stopped from dashboard")
+            return True, "engine stopped (open positions left untouched)"
+
+    def square_off(self) -> tuple[bool, str]:
+        engine = self._engine
+        if engine is None or not self.running:
+            return False, "engine is not running"
+        engine.square_off_all("manual (dashboard)")
+        return True, "square-off requested for all open positions"
+
+    def status(self) -> dict:
+        running = self.running
+        st: dict = {
+            "running": running,
+            "mode": self._engine.cfg.mode if (running and self._engine) else None,
+            "started_at": self.started_at if running else None,
+            "last_error": self.last_error,
+            "positions": [],
+            "realized_pnl_today": None,
+            "cash": None,
+        }
+        if running and self._engine is not None:
+            broker = self._engine.broker
+            st["realized_pnl_today"] = broker.realized_pnl_today()
+            if self._engine.cfg.mode == "paper":
+                st["cash"] = broker.state.cash
+            st["positions"] = [
+                {
+                    "pipeline": p.pipeline_id,
+                    "symbol": p.symbol,
+                    "direction": p.direction,
+                    "qty": p.qty,
+                    "entry_price": p.entry_price,
+                }
+                for p in broker.open_positions()
+            ]
+        return st
+
+
+def create_app(cfg: Config, api: UpstoxAPI, token: str | None = None) -> Flask:
     app = Flask(__name__, template_folder=os.path.join(os.path.dirname(__file__), "templates"))
     service = DashboardService(cfg, api)
+    controller = TradingController(cfg, api, token)
 
     @app.get("/")
     def dashboard():  # type: ignore[unused-variable]
@@ -283,12 +384,33 @@ def create_app(cfg: Config, api: UpstoxAPI) -> Flask:
 
     @app.get("/api/dashboard")
     def api_dashboard():  # type: ignore[unused-variable]
-        return jsonify(service.payload())
+        payload = dict(service.payload())
+        payload["trading"] = controller.status()
+        return jsonify(payload)
+
+    @app.post("/api/trading/start")
+    def trading_start():  # type: ignore[unused-variable]
+        body = request.get_json(silent=True) or {}
+        mode = str(body.get("mode", "paper")).lower()
+        if mode == "live" and body.get("confirm") != "LIVE":
+            return jsonify({"ok": False, "message": 'LIVE mode places real orders — confirmation "LIVE" required'}), 400
+        ok, msg = controller.start(mode)
+        return jsonify({"ok": ok, "message": msg}), (200 if ok else 409)
+
+    @app.post("/api/trading/stop")
+    def trading_stop():  # type: ignore[unused-variable]
+        ok, msg = controller.stop()
+        return jsonify({"ok": ok, "message": msg}), (200 if ok else 409)
+
+    @app.post("/api/trading/squareoff")
+    def trading_squareoff():  # type: ignore[unused-variable]
+        ok, msg = controller.square_off()
+        return jsonify({"ok": ok, "message": msg}), (200 if ok else 409)
 
     return app
 
 
-def run_web(cfg: Config, api: UpstoxAPI) -> None:
-    app = create_app(cfg, api)
+def run_web(cfg: Config, api: UpstoxAPI, token: str | None = None) -> None:
+    app = create_app(cfg, api, token)
     log.info("dashboard on http://%s:%d (refresh every %ds)", cfg.web_host, cfg.web_port, cfg.web_refresh_seconds)
     app.run(host=cfg.web_host, port=cfg.web_port, debug=False, threaded=True)

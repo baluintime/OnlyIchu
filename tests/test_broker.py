@@ -24,7 +24,7 @@ def test_paper_option_roundtrip(tmp_path):
     api = FakeAPI({"NSE_FO|123": 100.0})
     broker = PaperBroker(cfg, api)
 
-    pos = broker.enter("NIFTY:1m", "NSE_FO|123", "NIFTY CE", 75, "LONG", None, kind="OPTION")
+    pos = broker.enter("NIFTY:1m", "NSE_FO|123", "NIFTY CE", 75, "LONG", None)
     assert pos is not None and pos.entry_price == 100.0
     assert broker.state.cash == 100000.0 - 100.0 * 75
     assert broker.position_side("NIFTY:1m") == "LONG"
@@ -37,14 +37,28 @@ def test_paper_option_roundtrip(tmp_path):
     assert broker.realized_pnl_today() == 750.0
 
 
-def test_paper_synthetic_short(tmp_path):
+def test_paper_put_short_direction_is_also_long_premium(tmp_path):
+    # SHORT direction = bought ITM put: PnL is still (exit - entry) * qty
     cfg = make_cfg(tmp_path)
-    api = FakeAPI({"NSE_INDEX|X": 1000.0})
+    api = FakeAPI({"NSE_FO|9": 200.0})
     broker = PaperBroker(cfg, api)
-    broker.enter("SMALLCAP:5m", "NSE_INDEX|X", "SMALLCAP", 1, "SHORT", None, kind="SYNTHETIC")
-    api.prices["NSE_INDEX|X"] = 990.0
-    pnl = broker.exit("SMALLCAP:5m", price_hint=None)
-    assert pnl == 10.0  # short profits when index falls
+    broker.enter("BANKNIFTY:5m", "NSE_FO|9", "BANKNIFTY PE", 35, "SHORT", None)
+    api.prices["NSE_FO|9"] = 260.0  # put gains as index falls
+    assert broker.exit("BANKNIFTY:5m", price_hint=None) == 60.0 * 35
+
+
+def test_loads_old_state_with_extra_fields(tmp_path):
+    import json
+
+    cfg = make_cfg(tmp_path)
+    with open(cfg.paper_state_file, "w") as fh:
+        json.dump({"cash": 5000.0, "positions": {"A:1m": {
+            "pipeline_id": "A:1m", "instrument_key": "NSE_FO|1", "symbol": "X",
+            "qty": 10, "entry_price": 5.0, "entry_time": "t", "direction": "LONG",
+            "kind": "OPTION",  # legacy field no longer on Position
+        }}}, fh)
+    broker = PaperBroker(cfg, FakeAPI({}))
+    assert broker.position("A:1m").qty == 10
 
 
 def test_paper_state_persists(tmp_path):
