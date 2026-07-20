@@ -340,6 +340,54 @@
   @keyframes skshine { to { background-position-x: -220%; } }
 
   footer { margin-top: 30px; text-align: center; color: var(--faint); font-size: 12px; }
+
+  /* connection pill + connect screen */
+  .conn {
+    display: inline-flex; align-items: center; gap: 8px; padding: 7px 14px; cursor: pointer;
+    border-radius: 999px; font: 600 12.5px/1 inherit; letter-spacing: .4px;
+    border: 1px solid var(--card-border); background: rgba(255,255,255,.04); color: var(--muted);
+    transition: all .25s;
+  }
+  .conn:hover { transform: translateY(-1px); border-color: rgba(56,189,248,.4); }
+  .conn .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--faint); }
+  .conn.up { color: var(--green); border-color: rgba(34,197,94,.4); background: var(--green-soft); }
+  .conn.up .dot { background: var(--green); animation: ping 2s ease-out infinite; }
+  .conn.down { color: var(--amber); border-color: rgba(245,185,60,.4); background: var(--amber-soft); }
+  .conn.down .dot { background: var(--amber); }
+
+  .connect-screen {
+    margin-top: 20px; padding: 40px 28px; border-radius: 22px; text-align: center;
+    background: linear-gradient(160deg, rgba(255,255,255,.05), rgba(255,255,255,.02));
+    border: 1px solid var(--card-border); backdrop-filter: blur(14px); display: none;
+    animation: rise .5s ease both;
+  }
+  .connect-screen.show { display: block; }
+  .connect-screen .big { font-size: 46px; }
+  .connect-screen h2 { font-size: 22px; margin: 10px 0 6px; }
+  .connect-screen p { color: var(--muted); max-width: 560px; margin: 0 auto 6px; font-size: 13.5px; }
+
+  .modal-box.wide { width: min(540px, 94vw); text-align: left; border-color: rgba(56,189,248,.4);
+                    box-shadow: 0 0 60px rgba(56,189,248,.12); max-height: 90vh; overflow-y: auto; }
+  .modal-box.wide h3 { color: var(--cyan); }
+  .field { margin-bottom: 12px; }
+  .field label { display: block; font-size: 11px; letter-spacing: 1px; text-transform: uppercase;
+                 color: var(--muted); margin-bottom: 5px; }
+  .field input {
+    width: 100%; padding: 9px 12px; border-radius: 10px; border: 1px solid var(--card-border);
+    background: rgba(0,0,0,.4); color: var(--text); font: 500 13px/1.3 inherit; outline: none;
+    text-align: left; letter-spacing: normal;
+  }
+  .field input:focus { border-color: var(--cyan); }
+  .field .hint { font-size: 11px; color: var(--faint); margin-top: 4px; }
+  .steps { counter-reset: step; }
+  .step { border-top: 1px solid var(--card-border); padding-top: 14px; margin-top: 14px; }
+  .step:first-child { border-top: 0; padding-top: 0; margin-top: 0; }
+  .step h4 { font-size: 13px; color: var(--text); margin-bottom: 10px; letter-spacing: .3px; }
+  .step h4::before { counter-increment: step; content: counter(step); display: inline-grid;
+    place-items: center; width: 20px; height: 20px; border-radius: 50%; margin-right: 8px;
+    background: rgba(56,189,248,.15); color: var(--cyan); font-size: 11px; }
+  .or { text-align: center; color: var(--faint); font-size: 11px; margin: 8px 0; letter-spacing: 2px; }
+  .modal-msg { font-size: 12.5px; margin-top: 10px; min-height: 16px; }
 </style>
 </head>
 <body>
@@ -351,6 +399,7 @@
         <h1>OnlyIchu <small id="strategyMeta">Ichimoku Cloud · multi-timeframe</small></h1>
       </div>
     </div>
+    <button class="conn" id="connPill"><span class="dot"></span><span id="connText">…</span></button>
     <div class="pill" id="marketPill"><span class="dot"></span><span id="marketText">…</span></div>
     <div class="clock"><span id="clock">--:--:--</span><small id="clockDate">IST</small></div>
     <div class="refresh">
@@ -384,6 +433,14 @@
     <div id="paperPositions" style="display:flex;gap:8px;flex-wrap:wrap"></div>
   </div>
 
+  <div class="connect-screen" id="connectScreen">
+    <div class="big">🔌</div>
+    <h2>Connect your Upstox account</h2>
+    <p>Live index data, Ichimoku signals and trading all need an Upstox access token
+       (they expire daily, so you'll reconnect each morning).</p>
+    <p style="margin-top:14px"><button class="btn go" id="connectCta">Connect Upstox →</button></p>
+  </div>
+
   <div class="skeleton" id="skeleton">
     <div class="sk"></div><div class="sk"></div><div class="sk"></div>
     <div class="sk"></div><div class="sk"></div><div class="sk"></div>
@@ -411,6 +468,42 @@
       <div class="tlog-empty" id="tlogEmpty" style="display:none">No trades logged yet.</div>
     </div>
   </section>
+
+  <div class="modal" id="connModal">
+    <div class="modal-box wide">
+      <h3>🔌 Connect Upstox</h3>
+      <div class="steps">
+        <div class="step" id="stepCreds">
+          <h4>Your Upstox app credentials</h4>
+          <p style="color:var(--muted);font-size:12px;margin-bottom:10px">
+            Create an app at <a href="https://account.upstox.com/developer/apps" target="_blank" style="color:var(--cyan)">account.upstox.com/developer/apps</a>.
+            Set its <b>Redirect URI</b> to the value below so login returns here automatically.</p>
+          <div class="field"><label>API Key</label><input id="cApiKey" autocomplete="off" placeholder="Upstox API key"></div>
+          <div class="field"><label>API Secret</label><input id="cApiSecret" type="password" autocomplete="off" placeholder="Upstox API secret"></div>
+          <div class="field"><label>Redirect URI</label><input id="cRedirect" autocomplete="off">
+            <div class="hint">Must match exactly what you register on the Upstox app.</div></div>
+          <button class="btn" id="cSaveCreds">Save credentials</button>
+        </div>
+        <div class="step" id="stepLogin">
+          <h4>Log in &amp; authorize</h4>
+          <p style="color:var(--muted);font-size:12px;margin-bottom:10px">
+            Opens the Upstox login page. After you approve, you'll be redirected back and connected automatically.</p>
+          <button class="btn go" id="cLoginBtn">Open Upstox login →</button>
+          <div class="or">— OR PASTE MANUALLY —</div>
+          <div class="field"><label>Authorization code</label><input id="cCode" autocomplete="off" placeholder="the ?code= value from the redirect URL">
+            <div class="hint">Use this if your redirect URI doesn't point back to this page.</div></div>
+          <button class="btn" id="cCodeBtn">Exchange code</button>
+          <div class="or">— OR —</div>
+          <div class="field"><label>Paste an access token directly</label><input id="cToken" type="password" autocomplete="off" placeholder="existing Upstox access token"></div>
+          <button class="btn" id="cTokenBtn">Use token</button>
+        </div>
+      </div>
+      <div class="modal-msg" id="cMsg"></div>
+      <div class="modal-actions">
+        <button class="btn" id="cClose">Close</button>
+      </div>
+    </div>
+  </div>
 
   <div class="modal" id="liveModal">
     <div class="modal-box">
@@ -740,6 +833,87 @@ $("mOk").addEventListener("click", () => {
   post("/api/trading/start", { mode: "live", confirm: "LIVE" });
 });
 
+/* ---------- Upstox connection ---------- */
+let authState = { connected: false };
+
+function cMsg(text, isError) {
+  const m = $("cMsg");
+  m.textContent = text || "";
+  m.style.color = isError ? "var(--red)" : "var(--green)";
+}
+
+function openConnect() {
+  // prefill credentials fields from status
+  fetch("/api/auth/status", { cache: "no-store" }).then((r) => r.json()).then((s) => {
+    if (s.redirect_uri) $("cRedirect").value = s.redirect_uri;
+    else $("cRedirect").value = window.location.origin + "/callback";
+    $("stepLogin").style.opacity = s.credentials_set ? "1" : ".45";
+    $("stepLogin").style.pointerEvents = s.credentials_set ? "auto" : "none";
+    cMsg(s.credentials_set ? "" : "Save your app credentials first.", false);
+  });
+  $("connModal").classList.add("show");
+}
+
+$("connPill").addEventListener("click", () => {
+  if (authState.connected) {
+    if (confirm("Disconnect from Upstox? (stop the engine first if running)"))
+      post("/api/auth/logout");
+  } else openConnect();
+});
+$("connectCta").addEventListener("click", openConnect);
+$("cClose").addEventListener("click", () => $("connModal").classList.remove("show"));
+
+$("cSaveCreds").addEventListener("click", async () => {
+  const body = {
+    api_key: $("cApiKey").value, api_secret: $("cApiSecret").value, redirect_uri: $("cRedirect").value,
+  };
+  const resp = await fetch("/api/auth/credentials", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+  });
+  const data = await resp.json();
+  cMsg(data.message, !data.ok);
+  if (data.ok) { $("stepLogin").style.opacity = "1"; $("stepLogin").style.pointerEvents = "auto"; }
+});
+
+$("cLoginBtn").addEventListener("click", async () => {
+  const resp = await fetch("/api/auth/login-url", { cache: "no-store" });
+  const data = await resp.json();
+  if (data.ok && data.login_url) window.open(data.login_url, "_blank");
+  else cMsg(data.message || "could not build login URL", true);
+});
+
+async function authPost(url, body, okMsg) {
+  const resp = await fetch(url, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+  });
+  const data = await resp.json();
+  cMsg(data.message, !data.ok);
+  if (data.ok) { setTimeout(() => $("connModal").classList.remove("show"), 700); await loadData(); }
+}
+$("cCodeBtn").addEventListener("click", () => authPost("/api/auth/code", { code: $("cCode").value }));
+$("cTokenBtn").addEventListener("click", () => authPost("/api/auth/token", { access_token: $("cToken").value }));
+
+function renderAuth(a) {
+  authState = a || { connected: false };
+  const pill = $("connPill");
+  if (authState.connected) {
+    const who = authState.profile && authState.profile.name ? authState.profile.name : "Upstox";
+    pill.className = "conn up";
+    $("connText").textContent = "● " + who;
+    pill.title = "Connected — click to disconnect";
+    $("connectScreen").classList.remove("show");
+  } else {
+    pill.className = "conn down";
+    $("connText").textContent = "Connect Upstox";
+    pill.title = "Not connected — click to connect";
+    $("connectScreen").classList.add("show");
+    $("skeleton").style.display = "none";
+    $("grid").innerHTML = "";
+  }
+  // hide the trading control bar and account strip until connected
+  document.querySelector(".ctrl").style.display = authState.connected ? "" : "none";
+}
+
 /* ---------- settings (lots & capital) ---------- */
 function renderSettings(s) {
   if (!s) return;
@@ -825,10 +999,19 @@ async function loadData() {
   $("strategyMeta").textContent =
     "Ichimoku " + data.strategy.params + " · " + data.strategy.timeframes.join(" & ") + " · updated " + data.generated_at;
 
+  renderAuth(data.auth);
+
   const banner = $("banner");
   banner.className = "banner" + (data.error ? " show" : "");
   if (data.error) banner.textContent = "⚠ " + data.error;
 
+  if (data.connected === false) {
+    // disconnected: show only the connect screen; skip the rest
+    $("paperStrip").classList.remove("show");
+    $("tlog").style.display = "none";
+    return;
+  }
+  $("tlog").style.display = "";
   (data.indices || []).forEach(renderIndex);
   renderTrading(data.trading);
   renderAccount(data);

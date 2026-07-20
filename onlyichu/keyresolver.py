@@ -23,6 +23,8 @@ _ALIASES = {
     "smallcap": "smlcap",
     "financialservices": "finservice",
     "midcapselect": "midselect",
+    "niftynxt50": "niftynext50",
+    "nxt50": "next50",
 }
 
 

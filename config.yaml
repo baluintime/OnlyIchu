@@ -84,11 +84,7 @@ instruments:
     key: "NSE_INDEX|NIFTY MID SELECT"
     enabled: true
     options_available: true
-  - name: SMALLCAP
-    key: "NSE_INDEX|NIFTY SMLCAP 50"
+  - name: NIFTYNXT50
+    key: "NSE_INDEX|Nifty Next 50"
     enabled: true
-    options_available: false
-  - name: LARGECAP
-    key: "NSE_INDEX|Nifty 100"
-    enabled: true
-    options_available: false
+    options_available: true

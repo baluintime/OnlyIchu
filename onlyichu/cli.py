@@ -80,8 +80,12 @@ def cmd_web(args: argparse.Namespace) -> None:
 
     apply_overrides(cfg)
     resolve_index_keys(cfg.instruments)
-    token = auth.load_token()
+    # The web server starts even without a token — the user connects Upstox
+    # from the page. Any saved/env token is picked up automatically.
+    token = auth.stored_token()
     api = UpstoxAPI(token)
+    if not token:
+        print("No Upstox token yet — open the dashboard and click 'Connect Upstox'.")
     run_web(cfg, api, token)
 
 

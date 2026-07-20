@@ -18,6 +18,7 @@ from datetime import datetime, timedelta
 
 from flask import Flask, jsonify, render_template, request, send_file
 
+from . import auth
 from . import settings as settings_mod
 
 from .candles import Candle, TimeframeAggregator
@@ -157,6 +158,23 @@ class DashboardService:
 
     def payload(self) -> dict:
         with self._lock:
+            if not self.api.has_token:
+                # no cache while disconnected — cheap and always current
+                return {
+                    "connected": False,
+                    "generated_at": self._now().strftime("%H:%M:%S"),
+                    "generated_date": self._now().strftime("%a, %d %b %Y"),
+                    "refresh_seconds": self.cfg.web_refresh_seconds,
+                    "market": {"status": self._market_status(self._now()),
+                               "session": f"{self.cfg.market_open.strftime('%H:%M')}–{self.cfg.market_close.strftime('%H:%M')} IST"},
+                    "strategy": {
+                        "params": f"{self.params.tenkan}/{self.params.kijun}/{self.params.senkou_b} (disp {self.params.displacement})",
+                        "timeframes": [f"{tf}m" for tf in self.cfg.timeframes_minutes],
+                    },
+                    "error": None,
+                    "indices": [],
+                    "paper": None,
+                }
             if self._cached is not None and _time.monotonic() - self._cached_at < self.ttl:
                 return self._cached
             data = self._build()
@@ -238,6 +256,7 @@ class DashboardService:
             indices_payload.append(entry)
 
         return {
+            "connected": True,
             "generated_at": now.strftime("%H:%M:%S"),
             "generated_date": now.strftime("%a, %d %b %Y"),
             "refresh_seconds": self.cfg.web_refresh_seconds,
@@ -276,6 +295,28 @@ class DashboardService:
             "pnl_date": state.get("pnl_date"),
             "positions": positions,
         }
+
+
+def _callback_page(ok: bool, message: str) -> str:
+    color = "#22c55e" if ok else "#f4405f"
+    icon = "✓" if ok else "✕"
+    safe = message.replace("<", "&lt;").replace(">", "&gt;")
+    return f"""<!doctype html><html><head><meta charset="utf-8">
+<title>OnlyIchu — Upstox</title><style>
+  body {{ background:#060913; color:#e8edf7; font:15px/1.5 system-ui,sans-serif;
+         display:grid; place-items:center; height:100vh; margin:0; }}
+  .box {{ text-align:center; padding:36px 44px; border-radius:18px;
+          background:rgba(255,255,255,.04); border:1px solid rgba(255,255,255,.1); }}
+  .icon {{ font-size:44px; color:{color}; }}
+  h2 {{ margin:12px 0 6px; }} p {{ color:#8b96ad; max-width:380px; }}
+  a {{ color:#38bdf8; }}
+</style></head><body><div class="box">
+  <div class="icon">{icon}</div>
+  <h2>{"Connected" if ok else "Connection failed"}</h2>
+  <p>{safe}</p>
+  <p><a href="/">← Back to dashboard</a></p>
+  <script>{"setTimeout(function(){window.location='/';}, 1500);" if ok else ""}</script>
+</div></body></html>"""
 
 
 def read_trade_log(path: str, limit: int = 200) -> list[dict]:
@@ -390,10 +431,107 @@ class TradingController:
         return st
 
 
+class AuthManager:
+    """Handles connecting to Upstox from the web page: app credentials, the
+    OAuth login URL, code exchange, and token verification. Keeps the shared
+    UpstoxAPI and TradingController tokens in sync."""
+
+    def __init__(self, api: UpstoxAPI, controller: "TradingController"):
+        self.api = api
+        self.controller = controller
+        self.profile: dict | None = None
+
+    def _apply_token(self, token: str) -> None:
+        self.api.set_token(token)
+        self.controller.token = token
+        auth.save_token(token)
+
+    def verify_stored(self) -> None:
+        """Called once at startup: drop a stale overnight token so the page
+        shows 'disconnected' instead of failing every data fetch."""
+        if not self.api.has_token:
+            return
+        self.profile = auth.verify_token(self.api.access_token or "")
+        if self.profile is None:
+            log.info("stored Upstox token is expired/invalid — starting disconnected")
+            self.api.set_token(None)
+            self.controller.token = None
+
+    def status(self) -> dict:
+        creds = auth.load_app_credentials()
+        connected = self.api.has_token
+        return {
+            "connected": connected,
+            "credentials_set": creds.complete,
+            "redirect_uri": creds.redirect_uri,
+            "api_key_hint": (creds.api_key[:4] + "…") if creds.api_key else "",
+            "profile": {
+                "name": (self.profile or {}).get("user_name") or (self.profile or {}).get("name"),
+                "email": (self.profile or {}).get("email"),
+                "user_id": (self.profile or {}).get("user_id"),
+            } if self.profile else None,
+        }
+
+    def save_credentials(self, api_key: str, api_secret: str, redirect_uri: str) -> tuple[bool, str]:
+        if not (api_key.strip() and api_secret.strip() and redirect_uri.strip()):
+            return False, "api key, secret and redirect URI are all required"
+        auth.save_app_credentials(api_key, api_secret, redirect_uri)
+        return True, "credentials saved — click Connect Upstox to log in"
+
+    def login_url(self) -> tuple[bool, str]:
+        creds = auth.load_app_credentials()
+        if not creds.complete:
+            return False, "enter your Upstox app credentials first"
+        return True, auth.build_login_url(creds.api_key, creds.redirect_uri, state="onlyichu")
+
+    def complete_with_code(self, code: str) -> tuple[bool, str]:
+        creds = auth.load_app_credentials()
+        if not creds.complete:
+            return False, "app credentials are not configured"
+        if not code.strip():
+            return False, "authorization code is empty"
+        try:
+            token = auth.exchange_code(code, creds.api_key, creds.api_secret, creds.redirect_uri)
+        except auth.AuthError as exc:
+            return False, str(exc)
+        self.profile = auth.verify_token(token)
+        self._verified = True
+        self._apply_token(token)
+        name = (self.profile or {}).get("user_name") or "your account"
+        return True, f"connected to Upstox as {name}"
+
+    def set_manual_token(self, token: str) -> tuple[bool, str]:
+        token = token.strip()
+        if not token:
+            return False, "access token is empty"
+        profile = auth.verify_token(token)
+        if profile is None:
+            return False, "that access token was rejected by Upstox (expired or invalid)"
+        self.profile = profile
+        self._verified = True
+        self._apply_token(token)
+        return True, f"connected as {profile.get('user_name') or 'your account'}"
+
+    def logout(self) -> tuple[bool, str]:
+        if self.controller.running:
+            return False, "stop the trading engine before disconnecting"
+        self.api.set_token(None)
+        self.controller.token = None
+        self.profile = None
+        self._verified = True
+        try:
+            if auth.TOKEN_FILE.exists():
+                auth.TOKEN_FILE.unlink()
+        except OSError:
+            pass
+        return True, "disconnected from Upstox"
+
+
 def create_app(cfg: Config, api: UpstoxAPI, token: str | None = None) -> Flask:
     app = Flask(__name__, template_folder=os.path.join(os.path.dirname(__file__), "templates"))
     service = DashboardService(cfg, api)
     controller = TradingController(cfg, api, token)
+    auth_mgr = AuthManager(api, controller)
 
     @app.get("/")
     def dashboard():  # type: ignore[unused-variable]
@@ -403,11 +541,74 @@ def create_app(cfg: Config, api: UpstoxAPI, token: str | None = None) -> Flask:
     def api_dashboard():  # type: ignore[unused-variable]
         payload = dict(service.payload())
         payload["trading"] = controller.status()
+        payload["auth"] = auth_mgr.status()
         payload["settings"] = {
             "lots_per_trade": cfg.lots_per_trade,
             "capital": cfg.paper_starting_cash,
         }
         return jsonify(payload)
+
+    # ------------------------------------------------------------- auth
+
+    @app.get("/api/auth/status")
+    def auth_status():  # type: ignore[unused-variable]
+        return jsonify(auth_mgr.status())
+
+    @app.post("/api/auth/credentials")
+    def auth_credentials():  # type: ignore[unused-variable]
+        body = request.get_json(silent=True) or {}
+        ok, msg = auth_mgr.save_credentials(
+            str(body.get("api_key", "")),
+            str(body.get("api_secret", "")),
+            str(body.get("redirect_uri", "")),
+        )
+        result = {"ok": ok, "message": msg}
+        if ok:
+            lok, url = auth_mgr.login_url()
+            result["login_url"] = url if lok else None
+        return jsonify(result), (200 if ok else 400)
+
+    @app.get("/api/auth/login-url")
+    def auth_login_url():  # type: ignore[unused-variable]
+        ok, url = auth_mgr.login_url()
+        return jsonify({"ok": ok, "login_url": url if ok else None, "message": None if ok else url}), (200 if ok else 400)
+
+    @app.post("/api/auth/code")
+    def auth_code():  # type: ignore[unused-variable]
+        body = request.get_json(silent=True) or {}
+        ok, msg = auth_mgr.complete_with_code(str(body.get("code", "")))
+        if ok:
+            service._cached = None
+        return jsonify({"ok": ok, "message": msg}), (200 if ok else 400)
+
+    @app.post("/api/auth/token")
+    def auth_token():  # type: ignore[unused-variable]
+        body = request.get_json(silent=True) or {}
+        ok, msg = auth_mgr.set_manual_token(str(body.get("access_token", "")))
+        if ok:
+            service._cached = None
+        return jsonify({"ok": ok, "message": msg}), (200 if ok else 400)
+
+    @app.post("/api/auth/logout")
+    def auth_logout():  # type: ignore[unused-variable]
+        ok, msg = auth_mgr.logout()
+        if ok:
+            service._cached = None
+        return jsonify({"ok": ok, "message": msg}), (200 if ok else 409)
+
+    @app.get("/callback")
+    def auth_callback():  # type: ignore[unused-variable]
+        """Upstox redirects here after login (when the app's redirect URI is
+        set to http://<host>:<port>/callback). Exchanges the code and shows a
+        small confirmation page that returns to the dashboard."""
+        code = request.args.get("code", "")
+        err = request.args.get("error_description") or request.args.get("error")
+        if err:
+            return _callback_page(False, f"Upstox returned an error: {err}"), 400
+        ok, msg = auth_mgr.complete_with_code(code)
+        if ok:
+            service._cached = None
+        return _callback_page(ok, msg), (200 if ok else 400)
 
     @app.post("/api/settings")
     def api_settings():  # type: ignore[unused-variable]
@@ -506,10 +707,12 @@ def create_app(cfg: Config, api: UpstoxAPI, token: str | None = None) -> Flask:
         ok, msg = controller.square_off()
         return jsonify({"ok": ok, "message": msg}), (200 if ok else 409)
 
+    app.auth_manager = auth_mgr  # type: ignore[attr-defined]
     return app
 
 
 def run_web(cfg: Config, api: UpstoxAPI, token: str | None = None) -> None:
     app = create_app(cfg, api, token)
+    app.auth_manager.verify_stored()  # type: ignore[attr-defined]
     log.info("dashboard on http://%s:%d (refresh every %ds)", cfg.web_host, cfg.web_port, cfg.web_refresh_seconds)
     app.run(host=cfg.web_host, port=cfg.web_port, debug=False, threaded=True)

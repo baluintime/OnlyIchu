@@ -27,16 +27,29 @@ class UpstoxError(RuntimeError):
 
 
 class UpstoxAPI:
-    def __init__(self, access_token: str, max_retries: int = 3):
+    def __init__(self, access_token: str | None, max_retries: int = 3):
         self._session = requests.Session()
-        self._session.headers.update(
-            {"Accept": "application/json", "Authorization": f"Bearer {access_token}"}
-        )
+        self._session.headers.update({"Accept": "application/json"})
         self.max_retries = max_retries
+        self.set_token(access_token)
+
+    def set_token(self, access_token: str | None) -> None:
+        """Swap the bearer token (e.g. after a fresh web login)."""
+        self.access_token = access_token
+        if access_token:
+            self._session.headers["Authorization"] = f"Bearer {access_token}"
+        else:
+            self._session.headers.pop("Authorization", None)
+
+    @property
+    def has_token(self) -> bool:
+        return bool(self.access_token)
 
     # ------------------------------------------------------------------ core
 
     def _request(self, method: str, path: str, **kwargs: Any) -> dict:
+        if not self.access_token:
+            raise UpstoxError("not connected to Upstox — no access token")
         url = f"{BASE_URL}{path}"
         last_exc: Exception | None = None
         for attempt in range(self.max_retries):

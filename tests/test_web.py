@@ -45,12 +45,20 @@ def test_analyze_series_warmup():
 class FakeAPI:
     """Serves a long uptrend split across yesterday (historical) and today (intraday)."""
 
-    def __init__(self):
+    def __init__(self, token="faketoken"):
         yday = datetime(2026, 7, 15, 9, 15, tzinfo=IST)
         today = datetime.now(IST).replace(hour=9, minute=15, second=0, microsecond=0)
         self._hist = trending(100, 1000.0, 0.5, t0=yday)
         # far in the past relative to "now" so every candle counts as complete
         self._intra = trending(60, 1050.0, 1.0, t0=today - timedelta(days=0, hours=9))
+        self.access_token = token
+
+    @property
+    def has_token(self):
+        return bool(self.access_token)
+
+    def set_token(self, token):
+        self.access_token = token
 
     @staticmethod
     def _rows(candles):
@@ -124,6 +132,56 @@ def test_invalid_mode_rejected(tmp_path):
     resp = client.post("/api/trading/start", json={"mode": "yolo"})
     assert resp.status_code == 409
     assert "unknown mode" in resp.get_json()["message"]
+
+
+def test_dashboard_disconnected_when_no_token(tmp_path):
+    app = create_app(make_cfg(tmp_path), FakeAPI(token=None))
+    client = app.test_client()
+    body = client.get("/api/dashboard").get_json()
+    assert body["connected"] is False
+    assert body["auth"]["connected"] is False
+    assert body["indices"] == []
+
+
+def test_auth_connect_with_manual_token(tmp_path, monkeypatch):
+    from onlyichu import auth
+
+    monkeypatch.setattr(auth, "verify_token", lambda t: {"user_name": "Balaji", "email": "b@x.com"} if t == "good" else None)
+    monkeypatch.setattr(auth, "save_token", lambda t: None)
+
+    app = create_app(make_cfg(tmp_path), FakeAPI(token=None))
+    client = app.test_client()
+
+    assert client.post("/api/auth/token", json={"access_token": "bad"}).status_code == 400
+    resp = client.post("/api/auth/token", json={"access_token": "good"})
+    assert resp.status_code == 200 and resp.get_json()["ok"] is True
+
+    body = client.get("/api/dashboard").get_json()
+    assert body["auth"]["connected"] is True
+    assert body["auth"]["profile"]["name"] == "Balaji"
+
+
+def test_auth_credentials_and_login_url(tmp_path, monkeypatch):
+    from onlyichu import auth
+
+    saved = {}
+    monkeypatch.setattr(auth, "save_app_credentials",
+                        lambda k, s, r: saved.update(api_key=k, api_secret=s, redirect_uri=r))
+    monkeypatch.setattr(auth, "load_app_credentials",
+                        lambda: auth.AppCredentials(saved.get("api_key", ""), saved.get("api_secret", ""), saved.get("redirect_uri", "")))
+
+    app = create_app(make_cfg(tmp_path), FakeAPI(token=None))
+    client = app.test_client()
+
+    # missing fields rejected
+    assert client.post("/api/auth/credentials", json={"api_key": "k"}).status_code == 400
+    resp = client.post("/api/auth/credentials",
+                       json={"api_key": "k", "api_secret": "s", "redirect_uri": "http://x/callback"})
+    assert resp.status_code == 200
+    assert "login_url" in resp.get_json() and "client_id=k" in resp.get_json()["login_url"]
+
+    url = client.get("/api/auth/login-url").get_json()
+    assert url["ok"] and "client_id=k" in url["login_url"]
 
 
 def test_settings_apply_and_persist(tmp_path):

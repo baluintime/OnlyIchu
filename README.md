@@ -24,38 +24,45 @@ Implements the multi-timeframe execution protocol from
 
 | Config name | Index | Options |
 |---|---|---|
-| NIFTY | Nifty 50 | weekly/monthly contracts |
+| NIFTY | Nifty 50 | weekly + monthly contracts |
 | BANKNIFTY | Nifty Bank | monthly contracts |
 | FINNIFTY | Nifty Financial Services | monthly contracts |
 | MIDCPNIFTY | Nifty Midcap Select | monthly contracts |
-| SMALLCAP | Nifty Smallcap 50 | **none listed on NSE** |
-| LARGECAP | Nifty 100 | **none listed on NSE** |
+| NIFTYNXT50 | Nifty Next 50 | monthly contracts |
 
-> NSE only lists index options on Nifty, Bank Nifty, FinNifty, Midcap Select (and
-> Nifty Next 50). Smallcap/largecap indices have **no option contracts**, so they
-> are **signal-only**: their Ichimoku state and breakout signals are computed from
-> real market data and shown on the dashboard, but no trade is ever placed for
-> them (in either mode). Only real exchange-listed contracts are traded.
-> Everything is configurable in `config.yaml`.
+> All five indices have exchange-listed options on NSE. Keys are validated and
+> auto-corrected against Upstox's instrument master on startup, so casing
+> differences won't break them. Add/remove indices freely in `config.yaml`; any
+> index without listed options is treated as signal-only (shown on the dashboard,
+> never traded).
 
 ## Setup
 
 ```bash
 pip install -r requirements.txt
-cp .env.example .env        # fill in your Upstox app credentials
 ```
 
-Create an app at <https://account.upstox.com/developer/apps> and put its API key,
-secret, and redirect URI in `.env`.
+Create an app at <https://account.upstox.com/developer/apps>. You can enter its
+API key / secret / redirect URI **on the dashboard's Connect screen** (no `.env`
+needed), or put them in a `.env` file (`cp .env.example .env`) to skip that step.
 
-### Daily login (Upstox tokens expire every day ~3:30 AM IST)
+### Connecting Upstox (tokens expire daily ~3:30 AM IST)
 
-```bash
-python -m onlyichu login
-```
+Upstox access tokens last one trading day, so you connect once each morning.
+**Two ways:**
 
-Opens an OAuth URL; after approving, paste the `code` query parameter back into the
-prompt. The access token is stored in `~/.onlyichu/credentials.json`.
+- **From the web dashboard (recommended):** run `python -m onlyichu web`, open the
+  page, and click **Connect Upstox**. Enter your app credentials once (saved to
+  `~/.onlyichu/`), then **Open Upstox login** → approve → you're redirected back
+  and connected automatically. If your app's redirect URI doesn't point at the
+  dashboard, paste the `code` from the redirect URL, or paste an access token
+  directly — both options are on the same screen. Register your Upstox app's
+  redirect URI as `http://127.0.0.1:8080/callback` for the automatic flow.
+- **From the terminal:** `python -m onlyichu login`, then paste the `code`.
+
+The token is stored in `~/.onlyichu/credentials.json` and reused by `run`, `web`
+and `backtest`. The web server starts even without a token — it just shows the
+Connect screen until you're authenticated.
 
 ### Instrument keys are auto-validated
 
@@ -67,7 +74,7 @@ corrected key to put in `config.yaml`). An unresolvable index is disabled with
 suggestions instead of erroring forever. To search keys manually:
 
 ```bash
-python -m onlyichu instruments --index-only --search "smlcap"
+python -m onlyichu instruments --index-only --search "next 50"
 ```
 
 ## Run
