@@ -49,7 +49,8 @@ web:
 
 risk:
   lots_per_trade: 1
-  max_trades_per_day_per_pipeline: 10
+  # Max entries per (index, timeframe) pipeline per day. 0 = unlimited (no cap).
+  max_trades_per_day_per_pipeline: 0
   # Stop taking new entries once realized PnL for the day is below -max_daily_loss (INR). 0 disables.
   max_daily_loss: 10000
 

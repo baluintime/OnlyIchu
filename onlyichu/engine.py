@@ -196,7 +196,10 @@ class Engine:
         if self.cfg.max_daily_loss > 0 and self.broker.realized_pnl_today() <= -self.cfg.max_daily_loss:
             log.warning("%s entry skipped: daily loss limit hit (pnl=%.2f)", pid, self.broker.realized_pnl_today())
             return
-        if self.trades_today.get(pid, 0) >= self.cfg.max_trades_per_day_per_pipeline:
+        if (
+            self.cfg.max_trades_per_day_per_pipeline > 0
+            and self.trades_today.get(pid, 0) >= self.cfg.max_trades_per_day_per_pipeline
+        ):
             log.info("%s entry skipped: max trades/day reached", pid)
             return
 
