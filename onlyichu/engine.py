@@ -44,6 +44,37 @@ class IndexRunner:
         self.pipelines: dict[int, Pipeline] = {
             tf: Pipeline(index.name, tf, params) for tf in cfg.timeframes_minutes
         }
+        # opening-range breakout gate (per index, per day)
+        self.or_date = None  # type: ignore[assignment]
+        self.or_high: float | None = None
+        self.or_low: float | None = None
+        self.or_unlocked = False
+
+    def _or_window_end(self, d) -> time:
+        end = datetime.combine(d, self.cfg.market_open) + timedelta(minutes=self.cfg.opening_range_minutes)
+        return end.time()
+
+    def update_opening_range(self, candle: Candle) -> None:
+        """Track today's opening-range high/low from completed 1m candles and
+        unlock the index once a candle closes beyond that range."""
+        if self.cfg.opening_range_minutes <= 0:
+            return
+        d = candle.ts.date()
+        if self.or_date != d:  # new session — reset
+            self.or_date = d
+            self.or_high = self.or_low = None
+            self.or_unlocked = False
+        t = candle.ts.time()
+        if t < self.cfg.market_open:
+            return
+        if t < self._or_window_end(d):
+            self.or_high = candle.high if self.or_high is None else max(self.or_high, candle.high)
+            self.or_low = candle.low if self.or_low is None else min(self.or_low, candle.low)
+        elif not self.or_unlocked:
+            if self.or_high is None:
+                self.or_unlocked = True  # no range formed (data gap) — don't gate
+            elif candle.close > self.or_high or candle.close < self.or_low:
+                self.or_unlocked = True
 
 
 class Engine:
@@ -93,6 +124,7 @@ class Engine:
             for c in candles:
                 if runner.one_min.append(c):
                     new_1m.append(c)
+                    runner.update_opening_range(c)
             if 1 in runner.pipelines:
                 runner.pipelines[1].warmup(new_1m)
             for tf, agg in runner.aggregators.items():
@@ -166,6 +198,9 @@ class Engine:
             for candle in fresh:
                 if not runner.one_min.append(candle):
                     continue
+                # update the opening-range gate before any entry is evaluated,
+                # so the breakout candle itself can unlock and trade
+                runner.update_opening_range(candle)
                 self._process_candle(runner, 1, candle)
                 for tf, agg in runner.aggregators.items():
                     done = agg.feed(candle)
@@ -201,6 +236,14 @@ class Engine:
             and self.trades_today.get(pid, 0) >= self.cfg.max_trades_per_day_per_pipeline
         ):
             log.info("%s entry skipped: max trades/day reached", pid)
+            return
+        if self.cfg.opening_range_minutes > 0 and not runner.or_unlocked:
+            log.info(
+                "%s entry skipped: waiting for opening-range breakout (OR %s–%s)",
+                pid,
+                f"{runner.or_low:.1f}" if runner.or_low is not None else "?",
+                f"{runner.or_high:.1f}" if runner.or_high is not None else "?",
+            )
             return
 
         direction = "LONG" if signal.action == ENTER_LONG else "SHORT"

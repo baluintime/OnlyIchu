@@ -31,6 +31,9 @@ class Config:
     market_close: time = time(15, 30)
     entry_cutoff: time = time(15, 0)
     square_off: time = time(15, 15)
+    # No entries until price breaks the first N minutes' high/low (opening-range
+    # breakout). 0 disables — trade from the open.
+    opening_range_minutes: int = 0
 
     timeframes_minutes: list[int] = field(default_factory=lambda: [1, 5])
     tenkan: int = 9
@@ -98,6 +101,7 @@ def load_config(path: str = "config.yaml") -> Config:
     cfg.market_close = _parse_time(sess.get("market_close"), cfg.market_close)
     cfg.entry_cutoff = _parse_time(sess.get("entry_cutoff"), cfg.entry_cutoff)
     cfg.square_off = _parse_time(sess.get("square_off"), cfg.square_off)
+    cfg.opening_range_minutes = int(sess.get("opening_range_minutes", cfg.opening_range_minutes))
 
     strat = raw.get("strategy", {}) or {}
     cfg.timeframes_minutes = list(strat.get("timeframes_minutes", cfg.timeframes_minutes))

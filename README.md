@@ -95,8 +95,15 @@ Both modes need a valid access token (paper mode uses real market data). The eng
 2. polls Upstox for completed 1-minute candles, aggregates 5-minute candles locally,
 3. runs both Ichimoku pipelines per index on every candle close,
 4. selects an ITM option (delta 0.65–0.75, nearest expiry) and executes,
-5. enforces the entry cutoff, daily trade caps, daily loss limit, and force
-   square-off (defaults: no entries after 15:00, square-off 15:15 IST).
+5. enforces the opening-range breakout filter, entry cutoff, daily trade caps,
+   daily loss limit, and force square-off (defaults: no entries until price
+   breaks the first 15 minutes' range, none after 15:00, square-off 15:15 IST).
+
+**Opening-range breakout filter** (`session.opening_range_minutes`, default 15):
+the day's first entry per index is held until a candle closes beyond the high/low
+of the first N minutes. A flat/choppy open is skipped until the market picks a
+direction; a trending open breaks the range immediately and trades normally.
+Set to `0` to trade from the open.
 
 ### Live web dashboard
 

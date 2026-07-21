@@ -18,6 +18,10 @@ session:
   entry_cutoff: "15:00"
   # All open positions are force-closed at this time
   square_off: "15:15"
+  # Opening-range breakout filter: hold off on the day's first entry until price
+  # closes beyond the high/low of the first N minutes. Skips a flat/choppy open
+  # and waits for the market to pick a direction. 0 = trade from the open.
+  opening_range_minutes: 15
 
 strategy:
   # Both pipelines run independently per index, exactly per the strategy spec.
