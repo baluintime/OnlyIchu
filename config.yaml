@@ -40,6 +40,11 @@ options:
   limit_tolerance_pct: 0.25
   # I = intraday, D = delivery/margin
   product: I
+  # Liquidity guards — thin strikes with wide spreads are skipped. 0 disables a check.
+  # min_open_interest: reject strikes whose reported OI is below this.
+  # max_spread_pct: reject strikes whose bid-ask spread exceeds this % of the mid price.
+  min_open_interest: 0
+  max_spread_pct: 5.0
 
 web:
   host: 127.0.0.1

@@ -45,6 +45,9 @@ class Config:
     order_type: str = "LIMIT"
     limit_tolerance_pct: float = 0.25
     product: str = "I"
+    # liquidity guards (0 disables the check)
+    min_open_interest: int = 0
+    max_spread_pct: float = 0.0
 
     lots_per_trade: int = 1
     max_trades_per_day_per_pipeline: int = 10
@@ -111,6 +114,8 @@ def load_config(path: str = "config.yaml") -> Config:
     cfg.order_type = str(opts.get("order_type", cfg.order_type)).upper()
     cfg.limit_tolerance_pct = float(opts.get("limit_tolerance_pct", cfg.limit_tolerance_pct))
     cfg.product = opts.get("product", cfg.product)
+    cfg.min_open_interest = int(opts.get("min_open_interest", cfg.min_open_interest))
+    cfg.max_spread_pct = float(opts.get("max_spread_pct", cfg.max_spread_pct))
 
     risk = raw.get("risk", {}) or {}
     cfg.lots_per_trade = int(risk.get("lots_per_trade", cfg.lots_per_trade))

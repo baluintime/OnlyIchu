@@ -18,7 +18,9 @@ Implements the multi-timeframe execution protocol from
   Exit the moment a close rises above **any single** level.
 - **Option selection**: delta **0.65–0.75** (target 0.70) from the Upstox option
   chain greeks, nearest weekly/0DTE expiry, marketable **limit orders** with a
-  narrow tolerance.
+  narrow tolerance. Thin strikes are skipped via **liquidity guards** —
+  `min_open_interest` and `max_spread_pct` (bid-ask spread as % of mid) under
+  `options:` in `config.yaml`.
 
 ## Index universe
 

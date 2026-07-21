@@ -2,8 +2,10 @@
 
 Delta profile 0.65–0.75 (solidly ITM), nearest weekly/0DTE expiry. The
 selection uses Upstox's option-chain endpoint, which returns per-strike
-greeks and LTP. If greeks are missing (illiquid strikes), falls back to a
-strike roughly two steps in the money.
+greeks, LTP, open interest and bid/ask. Strikes that fail the configured
+liquidity guards (min open interest, max bid-ask spread) are skipped so thin
+strikes with wide spreads aren't traded. If greeks are missing, falls back to
+a strike roughly two steps in the money among the liquid strikes.
 """
 
 from __future__ import annotations
@@ -28,6 +30,8 @@ class OptionSelection:
     lot_size: int
     ltp: float | None
     delta: float | None
+    oi: float | None = None
+    spread_pct: float | None = None
 
 
 class OptionSelector:
@@ -69,13 +73,51 @@ class OptionSelector:
                 return int(c["lot_size"])
         return 1
 
+    # ------------------------------------------------------------ liquidity
+
+    @staticmethod
+    def _num(value) -> float | None:
+        """Parse a numeric field, keeping 0 (present-but-zero) distinct from None (absent)."""
+        try:
+            return float(value) if value is not None else None
+        except (TypeError, ValueError):
+            return None
+
+    def _liquidity(self, md: dict) -> tuple[float | None, float | None, float | None, float | None]:
+        """Returns (oi, bid, ask, spread_pct). spread_pct only when a two-sided quote exists."""
+        oi = self._num(md.get("oi"))
+        bid = self._num(md.get("bid_price"))
+        ask = self._num(md.get("ask_price"))
+        spread_pct = None
+        if bid is not None and ask is not None and bid > 0 and ask > 0:
+            mid = (bid + ask) / 2.0
+            spread_pct = (ask - bid) / mid * 100.0 if mid else None
+        return oi, bid, ask, spread_pct
+
+    def _is_liquid(
+        self, oi: float | None, bid: float | None, ask: float | None, spread_pct: float | None
+    ) -> tuple[bool, str]:
+        """Apply the configured liquidity guards. Missing data (None) is treated as
+        'unknown' and passes, so trading isn't blocked when the feed omits a field;
+        an explicit zero bid/ask (a present-but-dead quote) fails the spread check."""
+        if self.cfg.min_open_interest > 0 and oi is not None and oi < self.cfg.min_open_interest:
+            return False, f"OI {oi:.0f} < {self.cfg.min_open_interest}"
+        if self.cfg.max_spread_pct > 0 and bid is not None and ask is not None:
+            if bid <= 0 or ask <= 0:
+                return False, "no two-sided quote"
+            if spread_pct is not None and spread_pct > self.cfg.max_spread_pct:
+                return False, f"spread {spread_pct:.1f}% > {self.cfg.max_spread_pct:.1f}%"
+        return True, ""
+
     # ------------------------------------------------------------ selection
 
     def select_itm(self, underlying_key: str, direction: str, spot: float) -> OptionSelection | None:
         """Pick an ITM option for `direction` ("LONG" -> CE, "SHORT" -> PE).
 
-        Prefers the strike whose |delta| is closest to target_delta within
-        [delta_min, delta_max]; falls back to ~2 strikes in the money.
+        Considers only strikes that pass the liquidity guards, then prefers the
+        one whose |delta| is closest to target_delta within [delta_min,
+        delta_max]; falls back to ~2 strikes in the money if greeks are missing.
+        Returns None (skip the trade) if no liquid ITM strike exists.
         """
         expiry = self.nearest_expiry(underlying_key)
         if not expiry:
@@ -91,8 +133,10 @@ class OptionSelector:
             return None
 
         lot = self.lot_size(underlying_key, expiry)
-        candidates: list[tuple[float, dict, float, float | None, float | None]] = []
-        fallback: list[tuple[float, dict]] = []
+        # each entry: (strike, leg, ltp, delta, oi, spread_pct)
+        candidates: list[tuple[float, tuple]] = []  # (delta_score, entry)
+        fallback: list[tuple] = []
+        illiquid_skipped = 0
 
         for row in chain:
             strike = float(row.get("strike_price", 0) or 0)
@@ -102,34 +146,38 @@ class OptionSelector:
             itm = strike < spot if opt_type == "CE" else strike > spot
             if not itm:
                 continue
-            ltp = ((leg.get("market_data") or {}).get("ltp"))
-            ltp = float(ltp) if ltp not in (None, 0) else None
-            delta = (leg.get("option_greeks") or {}).get("delta")
-            delta = float(delta) if delta is not None else None
-            fallback.append((strike, leg))
+            md = leg.get("market_data") or {}
+            ltp = self._num(md.get("ltp"))
+            ltp = ltp if ltp not in (None, 0) else None
+            delta = self._num((leg.get("option_greeks") or {}).get("delta"))
+            oi, bid, ask, spread_pct = self._liquidity(md)
+            liquid, reason = self._is_liquid(oi, bid, ask, spread_pct)
+            if not liquid:
+                illiquid_skipped += 1
+                log.debug("%s %s strike %.0f skipped (%s)", underlying_key, opt_type, strike, reason)
+                continue
+            entry = (strike, leg, ltp, delta, oi, spread_pct)
+            fallback.append(entry)
             if delta is not None and self.cfg.delta_min <= abs(delta) <= self.cfg.delta_max:
-                candidates.append(
-                    (abs(abs(delta) - self.cfg.target_delta), row, strike, ltp, delta)
-                )
+                candidates.append((abs(abs(delta) - self.cfg.target_delta), entry))
 
         if candidates:
             candidates.sort(key=lambda t: t[0])
-            _, row, strike, ltp, delta = candidates[0]
-            leg = row[opt_field]
+            strike, leg, ltp, delta, oi, spread_pct = candidates[0][1]
         elif fallback:
             # ~2 strikes in the money: for calls the 2nd-highest strike below
             # spot; for puts the 2nd-lowest strike above spot.
             fallback.sort(key=lambda t: t[0], reverse=(opt_type == "CE"))
-            strike, leg = fallback[min(1, len(fallback) - 1)]
-            ltp = ((leg.get("market_data") or {}).get("ltp"))
-            ltp = float(ltp) if ltp not in (None, 0) else None
-            delta = (leg.get("option_greeks") or {}).get("delta")
-            delta = float(delta) if delta is not None else None
+            strike, leg, ltp, delta, oi, spread_pct = fallback[min(1, len(fallback) - 1)]
             log.warning(
                 "%s %s: no strike with delta in [%.2f, %.2f]; fell back to strike %.0f",
                 underlying_key, expiry, self.cfg.delta_min, self.cfg.delta_max, strike,
             )
         else:
+            log.warning(
+                "%s %s: no liquid ITM strike found (skipped %d thin strike(s)); entry skipped",
+                underlying_key, opt_type, illiquid_skipped,
+            )
             return None
 
         return OptionSelection(
@@ -141,4 +189,6 @@ class OptionSelector:
             lot_size=lot,
             ltp=ltp,
             delta=delta,
+            oi=oi,
+            spread_pct=spread_pct,
         )
