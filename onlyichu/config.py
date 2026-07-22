@@ -49,6 +49,7 @@ class Config:
     limit_tolerance_pct: float = 0.25
     product: str = "I"
     # liquidity guards (0 disables the check)
+    min_volume: int = 0
     min_open_interest: int = 0
     max_spread_pct: float = 0.0
 
@@ -118,6 +119,7 @@ def load_config(path: str = "config.yaml") -> Config:
     cfg.order_type = str(opts.get("order_type", cfg.order_type)).upper()
     cfg.limit_tolerance_pct = float(opts.get("limit_tolerance_pct", cfg.limit_tolerance_pct))
     cfg.product = opts.get("product", cfg.product)
+    cfg.min_volume = int(opts.get("min_volume", cfg.min_volume))
     cfg.min_open_interest = int(opts.get("min_open_interest", cfg.min_open_interest))
     cfg.max_spread_pct = float(opts.get("max_spread_pct", cfg.max_spread_pct))
 

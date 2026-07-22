@@ -4,10 +4,12 @@ from onlyichu.config import Config
 from onlyichu.options import OptionSelector
 
 
-def leg(key, delta, ltp=100.0, oi=100000, bid=99.5, ask=100.5):
+def leg(key, delta, ltp=100.0, oi=100000, bid=99.5, ask=100.5, volume=5000):
     md = {"ltp": ltp}
     if oi is not None:
         md["oi"] = oi
+    if volume is not None:
+        md["volume"] = volume
     if bid is not None:
         md["bid_price"] = bid
     if ask is not None:
@@ -67,6 +69,18 @@ def test_skips_wide_spread_strike():
     ]
     sel = make(rows, max_spread_pct=5.0).select_itm("NSE_INDEX|X", "LONG", 25000)
     assert sel is not None and sel.strike == 24900  # wide one skipped
+
+
+def test_skips_zero_volume_strike():
+    # reproduces the reported bug: a deep-ITM 0-volume strike with a garbage
+    # in-band delta must not be chosen over a real, traded near-ATM strike
+    rows = [
+        {"strike_price": 24375, "call_options": leg("CE24375", 0.70, ltp=381.65, volume=0)},
+        {"strike_price": 24600, "call_options": leg("CE24600", 0.68, ltp=139.10, volume=8000)},
+    ]
+    sel = make(rows, min_volume=1).select_itm("NSE_INDEX|X", "LONG", 24650)
+    assert sel is not None and sel.strike == 24600  # zero-volume strike skipped
+    assert sel.volume == 8000
 
 
 def test_skips_low_oi_strike():

@@ -261,9 +261,10 @@ class Engine:
             return
         qty = sel.lot_size * self.cfg.lots_per_trade
         log.info(
-            "%s %s -> BUY %s x%d (strike %.0f, delta %s, exp %s, oi %s, spread %s)",
+            "%s %s -> BUY %s x%d (strike %.0f, delta %s, exp %s, vol %s, oi %s, spread %s)",
             pid, direction, sel.trading_symbol, qty, sel.strike,
             f"{sel.delta:.2f}" if sel.delta is not None else "n/a", sel.expiry,
+            f"{sel.volume:.0f}" if sel.volume is not None else "n/a",
             f"{sel.oi:.0f}" if sel.oi is not None else "n/a",
             f"{sel.spread_pct:.1f}%" if sel.spread_pct is not None else "n/a",
         )

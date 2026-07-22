@@ -44,9 +44,13 @@ options:
   limit_tolerance_pct: 0.25
   # I = intraday, D = delivery/margin
   product: I
-  # Liquidity guards — thin strikes with wide spreads are skipped. 0 disables a check.
+  # Liquidity guards — thin/untraded strikes are skipped. 0 disables a check.
+  # min_volume: reject strikes that have traded fewer contracts today than this.
+  #   An untraded (0-volume) strike has a STALE ltp/greeks that mislead delta
+  #   selection and fabricate PnL, so keep this > 0. Raise it for stricter liquidity.
   # min_open_interest: reject strikes whose reported OI is below this.
   # max_spread_pct: reject strikes whose bid-ask spread exceeds this % of the mid price.
+  min_volume: 1
   min_open_interest: 0
   max_spread_pct: 5.0
 

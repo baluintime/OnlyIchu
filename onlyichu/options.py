@@ -31,6 +31,7 @@ class OptionSelection:
     ltp: float | None
     delta: float | None
     oi: float | None = None
+    volume: float | None = None
     spread_pct: float | None = None
 
 
@@ -83,23 +84,33 @@ class OptionSelector:
         except (TypeError, ValueError):
             return None
 
-    def _liquidity(self, md: dict) -> tuple[float | None, float | None, float | None, float | None]:
-        """Returns (oi, bid, ask, spread_pct). spread_pct only when a two-sided quote exists."""
+    def _liquidity(self, md: dict) -> tuple[float | None, float | None, float | None, float | None, float | None]:
+        """Returns (oi, volume, bid, ask, spread_pct). spread_pct only when a two-sided quote exists."""
         oi = self._num(md.get("oi"))
+        volume = self._num(md.get("volume"))
         bid = self._num(md.get("bid_price"))
         ask = self._num(md.get("ask_price"))
         spread_pct = None
         if bid is not None and ask is not None and bid > 0 and ask > 0:
             mid = (bid + ask) / 2.0
             spread_pct = (ask - bid) / mid * 100.0 if mid else None
-        return oi, bid, ask, spread_pct
+        return oi, volume, bid, ask, spread_pct
 
     def _is_liquid(
-        self, oi: float | None, bid: float | None, ask: float | None, spread_pct: float | None
+        self,
+        oi: float | None,
+        volume: float | None,
+        bid: float | None,
+        ask: float | None,
+        spread_pct: float | None,
     ) -> tuple[bool, str]:
         """Apply the configured liquidity guards. Missing data (None) is treated as
         'unknown' and passes, so trading isn't blocked when the feed omits a field;
-        an explicit zero bid/ask (a present-but-dead quote) fails the spread check."""
+        an explicit zero (a present-but-dead value) fails. The volume guard is key:
+        an untraded strike has a stale LTP/greeks that mislead delta selection and
+        fabricate PnL, so it must never be chosen."""
+        if self.cfg.min_volume > 0 and volume is not None and volume < self.cfg.min_volume:
+            return False, f"volume {volume:.0f} < {self.cfg.min_volume}"
         if self.cfg.min_open_interest > 0 and oi is not None and oi < self.cfg.min_open_interest:
             return False, f"OI {oi:.0f} < {self.cfg.min_open_interest}"
         if self.cfg.max_spread_pct > 0 and bid is not None and ask is not None:
@@ -133,7 +144,7 @@ class OptionSelector:
             return None
 
         lot = self.lot_size(underlying_key, expiry)
-        # each entry: (strike, leg, ltp, delta, oi, spread_pct)
+        # each entry: (strike, leg, ltp, delta, oi, volume, spread_pct)
         candidates: list[tuple[float, tuple]] = []  # (delta_score, entry)
         fallback: list[tuple] = []
         illiquid_skipped = 0
@@ -150,25 +161,25 @@ class OptionSelector:
             ltp = self._num(md.get("ltp"))
             ltp = ltp if ltp not in (None, 0) else None
             delta = self._num((leg.get("option_greeks") or {}).get("delta"))
-            oi, bid, ask, spread_pct = self._liquidity(md)
-            liquid, reason = self._is_liquid(oi, bid, ask, spread_pct)
+            oi, volume, bid, ask, spread_pct = self._liquidity(md)
+            liquid, reason = self._is_liquid(oi, volume, bid, ask, spread_pct)
             if not liquid:
                 illiquid_skipped += 1
                 log.debug("%s %s strike %.0f skipped (%s)", underlying_key, opt_type, strike, reason)
                 continue
-            entry = (strike, leg, ltp, delta, oi, spread_pct)
+            entry = (strike, leg, ltp, delta, oi, volume, spread_pct)
             fallback.append(entry)
             if delta is not None and self.cfg.delta_min <= abs(delta) <= self.cfg.delta_max:
                 candidates.append((abs(abs(delta) - self.cfg.target_delta), entry))
 
         if candidates:
             candidates.sort(key=lambda t: t[0])
-            strike, leg, ltp, delta, oi, spread_pct = candidates[0][1]
+            strike, leg, ltp, delta, oi, volume, spread_pct = candidates[0][1]
         elif fallback:
-            # ~2 strikes in the money: for calls the 2nd-highest strike below
-            # spot; for puts the 2nd-lowest strike above spot.
+            # ~2 strikes in the money among the *liquid* strikes: for calls the
+            # 2nd-highest strike below spot; for puts the 2nd-lowest above spot.
             fallback.sort(key=lambda t: t[0], reverse=(opt_type == "CE"))
-            strike, leg, ltp, delta, oi, spread_pct = fallback[min(1, len(fallback) - 1)]
+            strike, leg, ltp, delta, oi, volume, spread_pct = fallback[min(1, len(fallback) - 1)]
             log.warning(
                 "%s %s: no strike with delta in [%.2f, %.2f]; fell back to strike %.0f",
                 underlying_key, expiry, self.cfg.delta_min, self.cfg.delta_max, strike,
@@ -190,5 +201,6 @@ class OptionSelector:
             ltp=ltp,
             delta=delta,
             oi=oi,
+            volume=volume,
             spread_pct=spread_pct,
         )
