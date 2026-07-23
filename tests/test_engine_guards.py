@@ -66,3 +66,25 @@ def test_cap_zero_means_unlimited(tmp_path):
     engine, calls = make_engine(tmp_path, cap=0)
     _fire(engine, 25)
     assert calls["n"] == 25  # no cap: every signal becomes an entry
+
+
+def test_no_liquid_strike_records_skip(tmp_path):
+    engine, _ = make_engine(tmp_path, cap=0)
+    engine.selector.select_itm = lambda k, d, s: None  # no tradeable strike
+    engine._execute(engine.runners[0], _signal())
+    skips = engine.recent_skips()
+    assert len(skips) == 1
+    assert skips[0]["pipeline"] == "NIFTY:1m"
+    assert "no liquid strike" in skips[0]["reason"]
+
+
+def test_skip_cleared_after_successful_entry(tmp_path):
+    engine, _ = make_engine(tmp_path, cap=0)
+    engine.selector.select_itm = lambda k, d, s: None
+    engine._execute(engine.runners[0], _signal())
+    assert engine.recent_skips()  # recorded
+    # next candle finds a strike and enters -> stale skip cleared
+    engine.selector.select_itm = lambda k, d, s: OptionSelection(
+        "NSE_FO|1", "NIFTY CE", 25000, "CE", "2026-07-24", 65, 100.0, 0.7)
+    engine._execute(engine.runners[0], _signal())
+    assert engine.recent_skips() == []

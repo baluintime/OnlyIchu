@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time as _time
 from datetime import datetime, time, timedelta
 
 from .broker import BaseBroker, LiveBroker, PaperBroker
@@ -91,6 +92,22 @@ class Engine:
         self.trades_today: dict[str, int] = {}
         self._squared_off = False
         self._stop = threading.Event()
+        # latest entry-skip reason per pipeline, surfaced on the dashboard
+        self.last_skips: dict[str, dict] = {}
+
+    def _record_skip(self, pid: str, reason: str, direction: str | None = None) -> None:
+        self.last_skips[pid] = {"reason": reason, "direction": direction, "at": _time.time()}
+
+    def recent_skips(self, ttl: float = 90.0) -> list[dict]:
+        """Entry-skip notes from the last `ttl` seconds, for the dashboard."""
+        now = _time.time()
+        out = []
+        for pid, s in self.last_skips.items():
+            age = now - s["at"]
+            if age <= ttl:
+                out.append({"pipeline": pid, "reason": s["reason"],
+                            "direction": s["direction"], "age_s": round(age)})
+        return out
 
     # ------------------------------------------------------------ warmup
 
@@ -224,18 +241,23 @@ class Engine:
             return
 
         # entries
+        direction = "LONG" if signal.action == ENTER_LONG else "SHORT"
+        spot = signal.candle.close
         now_t = self._now().time()
         if self._squared_off or now_t >= self.cfg.entry_cutoff:
             log.info("%s entry skipped: past entry cutoff", pid)
+            self._record_skip(pid, "past entry cutoff", direction)
             return
         if self.cfg.max_daily_loss > 0 and self.broker.realized_pnl_today() <= -self.cfg.max_daily_loss:
             log.warning("%s entry skipped: daily loss limit hit (pnl=%.2f)", pid, self.broker.realized_pnl_today())
+            self._record_skip(pid, "daily loss limit reached", direction)
             return
         if (
             self.cfg.max_trades_per_day_per_pipeline > 0
             and self.trades_today.get(pid, 0) >= self.cfg.max_trades_per_day_per_pipeline
         ):
             log.info("%s entry skipped: max trades/day reached", pid)
+            self._record_skip(pid, "max trades/day reached", direction)
             return
         if self.cfg.opening_range_minutes > 0 and not runner.or_unlocked:
             log.info(
@@ -244,10 +266,8 @@ class Engine:
                 f"{runner.or_low:.1f}" if runner.or_low is not None else "?",
                 f"{runner.or_high:.1f}" if runner.or_high is not None else "?",
             )
+            self._record_skip(pid, "waiting for opening-range breakout", direction)
             return
-
-        direction = "LONG" if signal.action == ENTER_LONG else "SHORT"
-        spot = signal.candle.close
 
         if not runner.index.options_available:
             log.info("%s: %s has no listed options — signal only, no trade placed", pid, runner.index.name)
@@ -258,6 +278,7 @@ class Engine:
         sel = self.selector.select_itm(runner.index.key, direction, spot)
         if sel is None:
             log.warning("%s: no suitable ITM %s found; entry skipped", pid, "CALL" if direction == "LONG" else "PUT")
+            self._record_skip(pid, "no liquid strike — entry skipped", direction)
             return
         qty = sel.lot_size * self.cfg.lots_per_trade
         log.info(
@@ -271,6 +292,7 @@ class Engine:
         pos = self.broker.enter(pid, sel.instrument_key, sel.trading_symbol, qty, direction, sel.ltp)
         if pos is not None:
             self.trades_today[pid] = self.trades_today.get(pid, 0) + 1
+            self.last_skips.pop(pid, None)  # cleared: this pipeline just entered
 
     def square_off_all(self, reason: str) -> None:
         for pos in self.broker.open_positions():

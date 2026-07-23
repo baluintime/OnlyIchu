@@ -292,6 +292,12 @@
 
   .zone { font-size: 10px; letter-spacing: .6px; color: var(--muted); white-space: nowrap;
           overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+
+  .skip-note {
+    margin-top: 8px; padding: 5px 9px; border-radius: 8px; font-size: 11px; font-weight: 600;
+    color: var(--amber); background: var(--amber-soft); border: 1px solid rgba(245,185,60,.3);
+    animation: fadeDown .3s ease both;
+  }
   .zone.ABOVE { color: var(--green); } .zone.BELOW { color: var(--red); } .zone.IN { color: var(--amber); }
 
   .close-row { display: flex; justify-content: space-between; align-items: baseline; gap: 8px;
@@ -582,7 +588,8 @@ function buildPipe(pipeId) {
       <span class="zone"></span>
       <span class="sig">—</span>
     </div>
-    <div class="pipe-body"></div>`;
+    <div class="pipe-body"></div>
+    <div class="skip-note" style="display:none"></div>`;
   return pipe;
 }
 
@@ -704,6 +711,15 @@ function renderIndex(ix, order) {
     let pipe = $(pid);
     if (!pipe) { pipe = buildPipe(pid); pipes.appendChild(pipe); }
     renderPipe(pipe, p);
+    // surface a recent engine entry-skip note on the matching pipeline
+    const skip = pipelineSkips[`${ix.name}:${p.timeframe}`];
+    const note = pipe.querySelector(".skip-note");
+    if (skip) {
+      note.textContent = "⚠ " + skip.reason;
+      note.style.display = "";
+    } else {
+      note.style.display = "none";
+    }
   });
 }
 
@@ -748,6 +764,7 @@ function renderAccount(data) {
 /* ---------- engine controls ---------- */
 let desiredMode = "paper";
 let trading = { running: false, mode: null };
+let pipelineSkips = {};  // "NAME:1m" -> {reason, direction, age_s}
 
 function ctrlMsg(text, isError) {
   const m = $("ctrlMsg");
@@ -1012,6 +1029,9 @@ async function loadData() {
     return;
   }
   $("tlog").style.display = "";
+  // index by pipeline so cards can show a recent entry-skip note
+  pipelineSkips = {};
+  ((data.trading && data.trading.skips) || []).forEach((s) => { pipelineSkips[s.pipeline] = s; });
   (data.indices || []).forEach(renderIndex);
   renderTrading(data.trading);
   renderAccount(data);

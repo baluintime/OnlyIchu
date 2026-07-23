@@ -124,6 +124,12 @@ every `web.refresh_seconds` (default 10s) with a countdown ring; values flash
 green/red as they change. Host/port/refresh are set under `web:` in
 `config.yaml` or via `--host/--port`.
 
+**Entry-skip notes:** when the running engine skips an entry it wanted to take,
+a small amber note appears on the affected pipeline panel — e.g. *"no liquid
+strike — entry skipped"*, *"waiting for opening-range breakout"*, *"max
+trades/day reached"*, *"daily loss limit reached"*, or *"past entry cutoff"*.
+The note clears once that pipeline trades or after ~90 seconds.
+
 **Per-index trade toggle:** each tradeable index card has a TRADE switch.
 Switched off, the index stays fully visible on the dashboard (Ichimoku levels
 and LONG/SHORT signals keep updating from real data) but the engine will not

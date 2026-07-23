@@ -412,6 +412,7 @@ class TradingController:
             "positions": [],
             "realized_pnl_today": None,
             "cash": None,
+            "skips": [],
         }
         if running and self._engine is not None:
             broker = self._engine.broker
@@ -428,6 +429,7 @@ class TradingController:
                 }
                 for p in broker.open_positions()
             ]
+            st["skips"] = self._engine.recent_skips()
         return st
 
 
