@@ -237,7 +237,7 @@ class Engine:
     def _execute(self, runner: IndexRunner, signal: Signal) -> None:
         pid = signal.pipeline_id
         if signal.action == EXIT:
-            self.broker.exit(pid, price_hint=None, note="signal")
+            self.broker.exit(pid, price_hint=None, note="signal", underlying_spot=signal.candle.close)
             return
 
         # entries
@@ -289,12 +289,25 @@ class Engine:
             f"{sel.oi:.0f}" if sel.oi is not None else "n/a",
             f"{sel.spread_pct:.1f}%" if sel.spread_pct is not None else "n/a",
         )
-        pos = self.broker.enter(pid, sel.instrument_key, sel.trading_symbol, qty, direction, sel.ltp)
+        pos = self.broker.enter(
+            pid, sel.instrument_key, sel.trading_symbol, qty, direction, sel.ltp, underlying_spot=spot
+        )
         if pos is not None:
             self.trades_today[pid] = self.trades_today.get(pid, 0) + 1
             self.last_skips.pop(pid, None)  # cleared: this pipeline just entered
 
+    def _last_index_price(self, pipeline_id: str) -> float | None:
+        """Latest completed 1m index close for the position's index (for exit logging)."""
+        name = pipeline_id.split(":", 1)[0]
+        for runner in self.runners:
+            if runner.index.name == name and runner.one_min.candles:
+                return runner.one_min.candles[-1].close
+        return None
+
     def square_off_all(self, reason: str) -> None:
         for pos in self.broker.open_positions():
             log.info("square-off (%s): %s %s", reason, pos.pipeline_id, pos.symbol)
-            self.broker.exit(pos.pipeline_id, price_hint=None, note=f"square-off:{reason}")
+            self.broker.exit(
+                pos.pipeline_id, price_hint=None, note=f"square-off:{reason}",
+                underlying_spot=self._last_index_price(pos.pipeline_id),
+            )

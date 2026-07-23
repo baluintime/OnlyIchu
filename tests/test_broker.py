@@ -19,13 +19,33 @@ def make_cfg(tmp_path) -> Config:
     return cfg
 
 
+def test_trade_log_records_index_price(tmp_path):
+    import csv
+
+    cfg = make_cfg(tmp_path)
+    api = FakeAPI({"NSE_FO|1": 200.0})
+    broker = PaperBroker(cfg, api)
+    broker.enter("MIDCPNIFTY:1m", "NSE_FO|1", "MIDCP CE", 120, "LONG", None, underlying_spot=14650.0)
+    api.prices["NSE_FO|1"] = 210.0
+    broker.exit("MIDCPNIFTY:1m", price_hint=None, note="signal", underlying_spot=14658.0)
+
+    with open(cfg.paper_trade_log, newline="") as fh:
+        rows = list(csv.DictReader(fh))
+    assert "index_price" in rows[0]
+    assert rows[0]["action"] == "ENTRY" and rows[0]["index_price"] == "14650.00"
+    assert rows[1]["action"].startswith("EXIT") and rows[1]["index_price"] == "14658.00"
+    # entry_spot persisted on the position before exit
+    assert broker.position("MIDCPNIFTY:1m") is None  # closed
+
+
 def test_paper_option_roundtrip(tmp_path):
     cfg = make_cfg(tmp_path)
     api = FakeAPI({"NSE_FO|123": 100.0})
     broker = PaperBroker(cfg, api)
 
-    pos = broker.enter("NIFTY:1m", "NSE_FO|123", "NIFTY CE", 75, "LONG", None)
+    pos = broker.enter("NIFTY:1m", "NSE_FO|123", "NIFTY CE", 75, "LONG", None, underlying_spot=25000.0)
     assert pos is not None and pos.entry_price == 100.0
+    assert pos.entry_spot == 25000.0
     assert broker.state.cash == 100000.0 - 100.0 * 75
     assert broker.position_side("NIFTY:1m") == "LONG"
 

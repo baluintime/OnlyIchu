@@ -39,6 +39,7 @@ class Position:
     entry_price: float
     entry_time: str
     direction: str  # "LONG" | "SHORT" (underlying view; the option is always bought)
+    entry_spot: float | None = None  # underlying index level at entry
 
     def pnl(self, exit_price: float) -> float:
         return (exit_price - self.entry_price) * self.qty
@@ -81,6 +82,7 @@ class BaseBroker:
         qty: int,
         direction: str,
         price_hint: float | None,
+        underlying_spot: float | None = None,
     ) -> Position | None:
         if pipeline_id in self.state.positions:
             log.warning("%s already holds a position; entry skipped", pipeline_id)
@@ -96,13 +98,24 @@ class BaseBroker:
             entry_price=fill,
             entry_time=datetime.now().isoformat(timespec="seconds"),
             direction=direction,
+            entry_spot=underlying_spot,
         )
         self.state.positions[pipeline_id] = pos
-        self._log_trade("ENTRY", pos, fill, 0.0)
+        self._log_trade("ENTRY", pos, fill, 0.0, index_price=underlying_spot)
+        log.info(
+            "%s entered %s @ %.2f (index %s)", pipeline_id, pos.symbol, fill,
+            f"{underlying_spot:.2f}" if underlying_spot is not None else "n/a",
+        )
         self._persist()
         return pos
 
-    def exit(self, pipeline_id: str, price_hint: float | None, note: str = "") -> float | None:
+    def exit(
+        self,
+        pipeline_id: str,
+        price_hint: float | None,
+        note: str = "",
+        underlying_spot: float | None = None,
+    ) -> float | None:
         pos = self.state.positions.get(pipeline_id)
         if pos is None:
             return None
@@ -113,9 +126,14 @@ class BaseBroker:
         self._roll_pnl_date()
         self.state.realized_pnl_today += pnl
         del self.state.positions[pipeline_id]
-        self._log_trade(f"EXIT{(' ' + note) if note else ''}", pos, fill, pnl)
+        self._log_trade(f"EXIT{(' ' + note) if note else ''}", pos, fill, pnl, index_price=underlying_spot)
         self._persist()
-        log.info("%s exited %s @ %.2f pnl=%+.2f", pipeline_id, pos.symbol, fill, pnl)
+        log.info(
+            "%s exited %s @ %.2f pnl=%+.2f (index %s vs entry %s)",
+            pipeline_id, pos.symbol, fill, pnl,
+            f"{underlying_spot:.2f}" if underlying_spot is not None else "n/a",
+            f"{pos.entry_spot:.2f}" if pos.entry_spot is not None else "n/a",
+        )
         return pnl
 
     def realized_pnl_today(self) -> float:
@@ -141,19 +159,22 @@ class BaseBroker:
             self.state.pnl_date = today
             self.state.realized_pnl_today = 0.0
 
-    def _log_trade(self, action: str, pos: Position, price: float, pnl: float) -> None:
+    def _log_trade(
+        self, action: str, pos: Position, price: float, pnl: float, index_price: float | None = None
+    ) -> None:
         new_file = not os.path.exists(self.trade_log_path)
         with open(self.trade_log_path, "a", newline="", encoding="utf-8") as fh:
             writer = csv.writer(fh)
             if new_file:
                 writer.writerow(
                     ["time", "pipeline", "action", "symbol", "instrument_key",
-                     "direction", "qty", "price", "pnl"]
+                     "direction", "qty", "price", "index_price", "pnl"]
                 )
             writer.writerow(
                 [datetime.now().isoformat(timespec="seconds"), pos.pipeline_id, action,
                  pos.symbol, pos.instrument_key, pos.direction, pos.qty,
-                 f"{price:.2f}", f"{pnl:.2f}"]
+                 f"{price:.2f}", f"{index_price:.2f}" if index_price is not None else "",
+                 f"{pnl:.2f}"]
             )
 
 

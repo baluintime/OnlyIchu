@@ -467,7 +467,7 @@
       <table>
         <thead><tr>
           <th>Time</th><th>Pipeline</th><th>Action</th><th>Symbol</th>
-          <th>Dir</th><th>Qty</th><th>Price</th><th>PnL ₹</th>
+          <th>Dir</th><th>Qty</th><th>Price</th><th>Index</th><th>PnL ₹</th>
         </tr></thead>
         <tbody id="tlogBody"></tbody>
       </table>
@@ -994,6 +994,7 @@ async function loadTrades() {
         <td><span class="dir-badge ${t.direction || ""}">${t.direction || ""}</span></td>
         <td>${t.qty || ""}</td>
         <td>${t.price ? fmt.format(parseFloat(t.price)) : ""}</td>
+        <td>${t.index_price ? fmt.format(parseFloat(t.index_price)) : "—"}</td>
         <td class="${isEntry ? "" : pnl > 0 ? "pnl-pos" : pnl < 0 ? "pnl-neg" : ""}">
           ${isEntry ? "—" : (pnl >= 0 ? "+" : "") + fmt.format(pnl)}</td>`;
       body.appendChild(tr);

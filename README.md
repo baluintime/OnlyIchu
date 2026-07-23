@@ -173,7 +173,9 @@ checking signal frequency and direction — it does not model option premiums/th
 
 Everything lives in `config.yaml` — mode, timeframes, Ichimoku periods, delta band,
 order type/tolerance, lots per trade, risk caps, session times, and the index list.
-Trade history is appended to `state/trades_paper.csv` / `state/trades_live.csv`;
+Trade history is appended to `state/trades_paper.csv` / `state/trades_live.csv`
+(each row records the option fill `price` and the underlying `index_price` at
+that entry/exit, so you can see how the index moved versus the option);
 paper account state persists across restarts in `state/paper_state.json`.
 
 ## Project layout
