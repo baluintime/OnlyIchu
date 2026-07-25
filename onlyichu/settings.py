@@ -37,6 +37,8 @@ def apply_overrides(cfg: Config) -> None:
         cfg.lots_per_trade = int(data["lots_per_trade"])
     if "capital" in data:
         cfg.paper_starting_cash = float(data["capital"])
+    if "daily_profit_target" in data:
+        cfg.daily_profit_target = float(data["daily_profit_target"])
     toggles = data.get("trade_enabled") or {}
     for ix in cfg.instruments:
         if ix.name in toggles:
@@ -48,6 +50,7 @@ def save_overrides(
     lots: int | None = None,
     capital: float | None = None,
     trade_toggle: tuple[str, bool] | None = None,
+    profit_target: float | None = None,
 ) -> None:
     path = settings_path(cfg)
     data: dict = {}
@@ -61,6 +64,8 @@ def save_overrides(
         data["lots_per_trade"] = int(lots)
     if capital is not None:
         data["capital"] = float(capital)
+    if profit_target is not None:
+        data["daily_profit_target"] = float(profit_target)
     if trade_toggle is not None:
         name, enabled = trade_toggle
         data.setdefault("trade_enabled", {})[name] = bool(enabled)
@@ -69,7 +74,7 @@ def save_overrides(
         json.dump(data, fh, indent=2)
 
 
-def validate(lots, capital) -> str | None:
+def validate(lots, capital, profit_target=None) -> str | None:
     """Returns an error message, or None if values are acceptable."""
     if lots is not None:
         try:
@@ -85,4 +90,11 @@ def validate(lots, capital) -> str | None:
             return "capital must be a number"
         if not MIN_CAPITAL <= capital <= MAX_CAPITAL:
             return f"capital must be between {MIN_CAPITAL:,.0f} and {MAX_CAPITAL:,.0f}"
+    if profit_target is not None:
+        try:
+            pt = float(profit_target)
+        except (TypeError, ValueError):
+            return "profit target must be a number"
+        if pt < 0:
+            return "profit target must be 0 (disabled) or a positive number"
     return None

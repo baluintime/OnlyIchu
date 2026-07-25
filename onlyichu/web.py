@@ -283,6 +283,7 @@ class DashboardService:
             {
                 "pipeline": pid,
                 "symbol": pos.get("symbol"),
+                "strike": pos.get("strike"),
                 "direction": pos.get("direction"),
                 "qty": pos.get("qty"),
                 "entry_price": pos.get("entry_price"),
@@ -411,21 +412,37 @@ class TradingController:
             "last_error": self.last_error,
             "positions": [],
             "realized_pnl_today": None,
+            "unrealized_pnl": None,
+            "total_pnl": None,
+            "profit_target": None,
+            "halted": False,
+            "halt_reason": None,
             "cash": None,
             "skips": [],
         }
         if running and self._engine is not None:
-            broker = self._engine.broker
-            st["realized_pnl_today"] = broker.realized_pnl_today()
-            if self._engine.cfg.mode == "paper":
+            engine = self._engine
+            broker = engine.broker
+            realized = broker.realized_pnl_today()
+            unrealized, detail = broker.mark_to_market()
+            st["realized_pnl_today"] = realized
+            st["unrealized_pnl"] = unrealized
+            st["total_pnl"] = realized + unrealized
+            st["profit_target"] = engine.cfg.daily_profit_target or None
+            st["halted"] = engine._halted
+            st["halt_reason"] = engine._halt_reason or None
+            if engine.cfg.mode == "paper":
                 st["cash"] = broker.state.cash
             st["positions"] = [
                 {
                     "pipeline": p.pipeline_id,
                     "symbol": p.symbol,
+                    "strike": p.strike,
                     "direction": p.direction,
                     "qty": p.qty,
                     "entry_price": p.entry_price,
+                    "ltp": (detail.get(p.pipeline_id) or {}).get("ltp"),
+                    "upnl": (detail.get(p.pipeline_id) or {}).get("upnl"),
                 }
                 for p in broker.open_positions()
             ]
@@ -547,6 +564,7 @@ def create_app(cfg: Config, api: UpstoxAPI, token: str | None = None) -> Flask:
         payload["settings"] = {
             "lots_per_trade": cfg.lots_per_trade,
             "capital": cfg.paper_starting_cash,
+            "daily_profit_target": cfg.daily_profit_target,
         }
         return jsonify(payload)
 
@@ -617,7 +635,8 @@ def create_app(cfg: Config, api: UpstoxAPI, token: str | None = None) -> Flask:
         body = request.get_json(silent=True) or {}
         lots = body.get("lots_per_trade")
         capital = body.get("capital")
-        err = settings_mod.validate(lots, capital)
+        profit_target = body.get("daily_profit_target")
+        err = settings_mod.validate(lots, capital, profit_target)
         if err:
             return jsonify({"ok": False, "message": err}), 400
         messages = []
@@ -627,6 +646,15 @@ def create_app(cfg: Config, api: UpstoxAPI, token: str | None = None) -> Flask:
             if controller.running and engine is not None:
                 engine.cfg.lots_per_trade = int(lots)
             messages.append(f"lots per trade set to {int(lots)} (applies to new entries)")
+        if profit_target is not None:
+            pt = float(profit_target)
+            cfg.daily_profit_target = pt
+            engine = controller._engine
+            if controller.running and engine is not None:
+                engine.cfg.daily_profit_target = pt
+            messages.append(
+                f"daily profit target set to ₹{pt:,.0f}" if pt > 0 else "daily profit target disabled"
+            )
         if capital is not None:
             if controller.running and controller.status().get("mode") == "paper":
                 return jsonify(
@@ -647,7 +675,7 @@ def create_app(cfg: Config, api: UpstoxAPI, token: str | None = None) -> Flask:
             with open(cfg.paper_state_file, "w", encoding="utf-8") as fh:
                 json.dump(state, fh, indent=2)
             messages.append(f"paper capital set to ₹{capital:,.0f}")
-        settings_mod.save_overrides(cfg, lots=lots, capital=capital)
+        settings_mod.save_overrides(cfg, lots=lots, capital=capital, profit_target=profit_target)
         service._cached = None  # bust cache so the strip updates immediately
         return jsonify({"ok": True, "message": "; ".join(messages) or "nothing to change"})
 

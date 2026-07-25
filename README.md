@@ -139,6 +139,14 @@ Toggles apply instantly (even to a running engine), persist in
 `state/settings.json`, and can also be preset with `trade_enabled: false` per
 instrument in `config.yaml`.
 
+**Live P&L and daily profit target:** while the engine runs, the account strip
+shows **Unrealized MTM** and **Total P&L** (realized + unrealized) alongside
+realized, and each open-position chip shows its **strike, entry, current LTP and
+unrealized P&L**, refreshed every cycle. Set a **TARGET ₹** in the control bar
+(or `risk.daily_profit_target` in `config.yaml`): the moment total profit reaches
+it, the engine **squares off every position at market and halts all trading for
+the rest of the day** — the status pill shows `⛔ HALTED`. `0` disables it.
+
 **Lot size & capital from the page:** the control bar has LOTS and CAPITAL ₹
 inputs with an APPLY button. Lots-per-trade takes effect on the next entry
 (even while the engine is running); capital resets the paper account's cash

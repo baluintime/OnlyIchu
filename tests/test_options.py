@@ -1,7 +1,12 @@
 """ITM option selection: delta band + liquidity guards."""
 
+from datetime import date, timedelta
+
 from onlyichu.config import Config
 from onlyichu.options import OptionSelector
+
+# a future expiry so nearest_expiry() never filters it out as stale
+FUTURE_EXPIRY = (date.today() + timedelta(days=3)).isoformat()
 
 
 def leg(key, delta, ltp=100.0, oi=100000, bid=99.5, ask=100.5, volume=5000):
@@ -29,7 +34,7 @@ class ChainAPI:
         self._rows = rows
 
     def option_contracts(self, key):
-        return [{"expiry": "2026-07-24", "lot_size": 75}]
+        return [{"expiry": FUTURE_EXPIRY, "lot_size": 75}]
 
     def option_chain(self, key, expiry):
         return self._rows

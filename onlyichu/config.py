@@ -56,6 +56,9 @@ class Config:
     lots_per_trade: int = 1
     max_trades_per_day_per_pipeline: int = 10
     max_daily_loss: float = 10000.0
+    # When total profit (realized + unrealized) reaches this INR value, square off
+    # everything and stop trading for the day. 0 disables.
+    daily_profit_target: float = 0.0
 
     web_host: str = "127.0.0.1"
     web_port: int = 8080
@@ -129,6 +132,7 @@ def load_config(path: str = "config.yaml") -> Config:
         risk.get("max_trades_per_day_per_pipeline", cfg.max_trades_per_day_per_pipeline)
     )
     cfg.max_daily_loss = float(risk.get("max_daily_loss", cfg.max_daily_loss))
+    cfg.daily_profit_target = float(risk.get("daily_profit_target", cfg.daily_profit_target))
 
     web = raw.get("web", {}) or {}
     cfg.web_host = web.get("host", cfg.web_host)

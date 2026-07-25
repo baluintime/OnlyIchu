@@ -425,6 +425,7 @@
     <span class="ctrl-sep"></span>
     <label class="num"><span>LOTS</span><input id="inpLots" class="narrow" type="number" min="1" max="100" step="1"></label>
     <label class="num"><span>CAPITAL ₹</span><input id="inpCapital" type="number" min="1000" step="10000"></label>
+    <label class="num"><span>TARGET ₹</span><input id="inpTarget" type="number" min="0" step="1000" title="Square off all &amp; stop for the day when total profit reaches this. 0 = off."></label>
     <button class="btn" id="btnApply">APPLY</button>
     <span class="engine-status" id="engineStatus"><span class="dot"></span><span id="engineText">ENGINE STOPPED</span></span>
     <div class="ctrl-msg" id="ctrlMsg"></div>
@@ -435,6 +436,9 @@
   <div class="paper" id="paperStrip">
     <div class="kv"><small id="cashLabel">Paper cash</small><b id="paperCash">—</b></div>
     <div class="kv"><small>Realized PnL <span id="paperDate"></span></small><b id="paperPnl">—</b></div>
+    <div class="kv" id="kvUnreal" style="display:none"><small>Unrealized MTM</small><b id="paperUnreal">—</b></div>
+    <div class="kv" id="kvTotal" style="display:none"><small>Total P&amp;L</small><b id="paperTotal">—</b></div>
+    <div class="kv" id="kvTarget" style="display:none"><small>Target</small><b id="paperTarget">—</b></div>
     <div class="kv"><small>Open positions</small><b id="paperCount">0</b></div>
     <div id="paperPositions" style="display:flex;gap:8px;flex-wrap:wrap"></div>
   </div>
@@ -752,12 +756,41 @@ function renderAccount(data) {
   setText(pnlEl, (pnl >= 0 ? "+₹ " : "-₹ ") + fmt.format(Math.abs(pnl)), true);
   pnlEl.style.color = pnl > 0 ? "var(--green)" : pnl < 0 ? "var(--red)" : "var(--text)";
   $("paperDate").textContent = pnlDate ? "(" + pnlDate + ")" : "";
+
+  const money = (v) => (v >= 0 ? "+₹ " : "-₹ ") + fmt.format(Math.abs(v));
+  const colorOf = (v) => v > 0 ? "var(--green)" : v < 0 ? "var(--red)" : "var(--text)";
+  // live-only extras: unrealized MTM, total P&L, and target progress
+  const live = t && t.running;
+  $("kvUnreal").style.display = live && t.unrealized_pnl != null ? "" : "none";
+  $("kvTotal").style.display = live && t.total_pnl != null ? "" : "none";
+  $("kvTarget").style.display = live && t.profit_target ? "" : "none";
+  if (live && t.unrealized_pnl != null) {
+    const u = t.unrealized_pnl;
+    setText($("paperUnreal"), money(u), true);
+    $("paperUnreal").style.color = colorOf(u);
+  }
+  if (live && t.total_pnl != null) {
+    const tot = t.total_pnl;
+    setText($("paperTotal"), money(tot), true);
+    $("paperTotal").style.color = colorOf(tot);
+    if (t.profit_target) {
+      const pct = Math.max(0, Math.min(100, tot / t.profit_target * 100));
+      setText($("paperTarget"), "₹ " + fmt.format(t.profit_target) + " (" + pct.toFixed(0) + "%)");
+    }
+  }
+
   setText($("paperCount"), String(positions.length));
   const box = $("paperPositions");
   box.innerHTML = "";
   positions.forEach((pos) => {
-    box.appendChild(el("span", "pos-chip " + pos.direction,
-      `${pos.pipeline} · ${pos.symbol} × ${pos.qty} @ ${fmt.format(pos.entry_price)}`));
+    const chip = el("span", "pos-chip " + pos.direction);
+    let txt = `${pos.pipeline} · ${pos.symbol}`;
+    if (pos.strike != null) txt += ` (${fmt.format(pos.strike)})`;
+    txt += ` × ${pos.qty} @ ${fmt.format(pos.entry_price)}`;
+    if (pos.ltp != null) txt += ` → ${fmt.format(pos.ltp)}`;
+    if (pos.upnl != null) txt += `  ${pos.upnl >= 0 ? "+" : ""}${fmt.format(pos.upnl)}`;
+    chip.textContent = txt;
+    box.appendChild(chip);
   });
 }
 
@@ -777,7 +810,13 @@ function renderTrading(t) {
   trading = t || { running: false };
   const status = $("engineStatus");
   const btn = $("btnStart");
-  if (trading.running) {
+  if (trading.running && trading.halted) {
+    status.className = "engine-status on-live";
+    $("engineText").textContent = "⛔ HALTED · " + (trading.halt_reason || "trading stopped for the day");
+    btn.textContent = "■ STOP";
+    btn.className = "btn halt";
+    desiredMode = trading.mode;
+  } else if (trading.running) {
     status.className = "engine-status on-" + trading.mode;
     $("engineText").textContent = "ENGINE RUNNING · " + trading.mode.toUpperCase() +
       (trading.started_at ? " · since " + trading.started_at : "");
@@ -931,25 +970,29 @@ function renderAuth(a) {
   document.querySelector(".ctrl").style.display = authState.connected ? "" : "none";
 }
 
-/* ---------- settings (lots & capital) ---------- */
+/* ---------- settings (lots, capital, profit target) ---------- */
 function renderSettings(s) {
   if (!s) return;
-  const lots = $("inpLots"), cap = $("inpCapital");
+  const lots = $("inpLots"), cap = $("inpCapital"), tgt = $("inpTarget");
   // don't clobber values the user is currently editing
   if (document.activeElement !== lots && !lots.dataset.dirty) lots.value = s.lots_per_trade;
   if (document.activeElement !== cap && !cap.dataset.dirty) cap.value = s.capital;
+  if (document.activeElement !== tgt && !tgt.dataset.dirty) tgt.value = s.daily_profit_target ?? 0;
 }
-["inpLots", "inpCapital"].forEach((id) =>
+["inpLots", "inpCapital", "inpTarget"].forEach((id) =>
   $(id).addEventListener("input", (e) => { e.target.dataset.dirty = "1"; }));
 
 $("btnApply").addEventListener("click", async () => {
   const lots = parseInt($("inpLots").value, 10);
   const capital = parseFloat($("inpCapital").value);
+  const target = parseFloat($("inpTarget").value);
   if (!Number.isFinite(lots) || lots < 1) { ctrlMsg("lots must be a whole number ≥ 1", true); return; }
   if (!Number.isFinite(capital) || capital < 1000) { ctrlMsg("capital must be at least ₹1,000", true); return; }
-  await post("/api/settings", { lots_per_trade: lots, capital: capital });
+  if (!Number.isFinite(target) || target < 0) { ctrlMsg("target must be 0 (off) or a positive number", true); return; }
+  await post("/api/settings", { lots_per_trade: lots, capital: capital, daily_profit_target: target });
   delete $("inpLots").dataset.dirty;
   delete $("inpCapital").dataset.dirty;
+  delete $("inpTarget").dataset.dirty;
 });
 
 /* ---------- trade log ---------- */

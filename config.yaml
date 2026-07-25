@@ -66,6 +66,10 @@ risk:
   max_trades_per_day_per_pipeline: 0
   # Stop taking new entries once realized PnL for the day is below -max_daily_loss (INR). 0 disables.
   max_daily_loss: 10000
+  # When total profit (realized + unrealized MTM) reaches this INR value, square off
+  # all positions at market and stop trading for the rest of the day. 0 disables.
+  # Also settable live from the dashboard's TARGET box.
+  daily_profit_target: 0
 
 paper:
   starting_cash: 500000

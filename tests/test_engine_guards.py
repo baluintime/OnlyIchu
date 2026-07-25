@@ -35,7 +35,7 @@ def make_engine(tmp_path, cap):
     )
     calls = {"n": 0}
 
-    def fake_enter(pid, ik, sym, qty, direction, price_hint, underlying_spot=None):
+    def fake_enter(pid, ik, sym, qty, direction, price_hint, underlying_spot=None, strike=None):
         calls["n"] += 1
         return object()  # non-None => counted as a real entry
 

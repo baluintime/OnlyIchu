@@ -192,20 +192,28 @@ def test_settings_apply_and_persist(tmp_path):
     app = create_app(cfg, FakeAPI())
     client = app.test_client()
 
-    resp = client.post("/api/settings", json={"lots_per_trade": 3, "capital": 250000})
+    resp = client.post("/api/settings", json={"lots_per_trade": 3, "capital": 250000, "daily_profit_target": 5000})
     assert resp.status_code == 200 and resp.get_json()["ok"] is True
     assert cfg.lots_per_trade == 3
     assert cfg.paper_starting_cash == 250000.0
+    assert cfg.daily_profit_target == 5000.0
     # paper state file cash was reset to the new capital
     with open(cfg.paper_state_file) as fh:
         assert json.load(fh)["cash"] == 250000.0
     # settings echoed in the dashboard payload
     body = client.get("/api/dashboard").get_json()
-    assert body["settings"] == {"lots_per_trade": 3, "capital": 250000.0}
+    assert body["settings"] == {"lots_per_trade": 3, "capital": 250000.0, "daily_profit_target": 5000.0}
     # overrides persisted for the next start
     with open(tmp_path / "settings.json") as fh:
         saved = json.load(fh)
-    assert saved == {"lots_per_trade": 3, "capital": 250000.0}
+    assert saved == {"lots_per_trade": 3, "capital": 250000.0, "daily_profit_target": 5000.0}
+
+
+def test_profit_target_validation(tmp_path):
+    app = create_app(make_cfg(tmp_path), FakeAPI())
+    client = app.test_client()
+    assert client.post("/api/settings", json={"daily_profit_target": -5}).status_code == 400
+    assert client.post("/api/settings", json={"daily_profit_target": 0}).status_code == 200
 
 
 def test_settings_validation(tmp_path):

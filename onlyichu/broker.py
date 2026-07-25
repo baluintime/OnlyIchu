@@ -40,6 +40,7 @@ class Position:
     entry_time: str
     direction: str  # "LONG" | "SHORT" (underlying view; the option is always bought)
     entry_spot: float | None = None  # underlying index level at entry
+    strike: float | None = None  # option strike price
 
     def pnl(self, exit_price: float) -> float:
         return (exit_price - self.entry_price) * self.qty
@@ -60,6 +61,7 @@ class BaseBroker:
         self.cfg = cfg
         self.state = BrokerState(pnl_date=datetime.now().strftime("%Y-%m-%d"))
         self.trade_log_path = trade_log_path
+        self.api = None  # set by subclasses; used for live mark-to-market
         os.makedirs(os.path.dirname(trade_log_path) or ".", exist_ok=True)
 
     # -- interface -----------------------------------------------------
@@ -83,6 +85,7 @@ class BaseBroker:
         direction: str,
         price_hint: float | None,
         underlying_spot: float | None = None,
+        strike: float | None = None,
     ) -> Position | None:
         if pipeline_id in self.state.positions:
             log.warning("%s already holds a position; entry skipped", pipeline_id)
@@ -99,6 +102,7 @@ class BaseBroker:
             entry_time=datetime.now().isoformat(timespec="seconds"),
             direction=direction,
             entry_spot=underlying_spot,
+            strike=strike,
         )
         self.state.positions[pipeline_id] = pos
         self._log_trade("ENTRY", pos, fill, 0.0, index_price=underlying_spot)
@@ -139,6 +143,34 @@ class BaseBroker:
     def realized_pnl_today(self) -> float:
         self._roll_pnl_date()
         return self.state.realized_pnl_today
+
+    def mark_to_market(self) -> tuple[float, dict[str, dict]]:
+        """Current unrealized PnL across open positions, plus per-position detail
+        (ltp, upnl, strike, ...). Uses the broker's API for live option LTPs."""
+        positions = self.open_positions()
+        detail: dict[str, dict] = {}
+        total = 0.0
+        ltps: dict[str, float] = {}
+        if positions and self.api is not None:
+            try:
+                ltps = self.api.ltp([p.instrument_key for p in positions])
+            except Exception as exc:  # noqa: BLE001 - MTM is best-effort
+                log.debug("mark-to-market LTP fetch failed: %s", exc)
+        for p in positions:
+            ltp = ltps.get(p.instrument_key)
+            upnl = p.pnl(ltp) if ltp is not None else None
+            if upnl is not None:
+                total += upnl
+            detail[p.pipeline_id] = {
+                "symbol": p.symbol, "strike": p.strike, "direction": p.direction,
+                "qty": p.qty, "entry_price": p.entry_price, "ltp": ltp, "upnl": upnl,
+                "entry_spot": p.entry_spot,
+            }
+        return total, detail
+
+    def total_pnl(self) -> float:
+        """Realized today + current unrealized (mark-to-market)."""
+        return self.realized_pnl_today() + self.mark_to_market()[0]
 
     # -- hooks ----------------------------------------------------------
 

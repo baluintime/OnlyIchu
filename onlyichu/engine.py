@@ -91,6 +91,8 @@ class Engine:
         self.runners = [IndexRunner(ix, cfg, self.params) for ix in cfg.enabled_instruments]
         self.trades_today: dict[str, int] = {}
         self._squared_off = False
+        self._halted = False
+        self._halt_reason = ""
         self._stop = threading.Event()
         # latest entry-skip reason per pipeline, surfaced on the dashboard
         self.last_skips: dict[str, dict] = {}
@@ -186,6 +188,7 @@ class Engine:
                 self.square_off_all("square-off time")
                 self._squared_off = True
             self.poll_once()
+            self.check_profit_target()
             self._stop.wait(self.cfg.poll_interval_seconds)
         if self._stop.is_set():
             log.info("engine stopped on request (open positions are left untouched)")
@@ -244,6 +247,9 @@ class Engine:
         direction = "LONG" if signal.action == ENTER_LONG else "SHORT"
         spot = signal.candle.close
         now_t = self._now().time()
+        if self._halted:
+            self._record_skip(pid, self._halt_reason or "trading halted", direction)
+            return
         if self._squared_off or now_t >= self.cfg.entry_cutoff:
             log.info("%s entry skipped: past entry cutoff", pid)
             self._record_skip(pid, "past entry cutoff", direction)
@@ -290,11 +296,34 @@ class Engine:
             f"{sel.spread_pct:.1f}%" if sel.spread_pct is not None else "n/a",
         )
         pos = self.broker.enter(
-            pid, sel.instrument_key, sel.trading_symbol, qty, direction, sel.ltp, underlying_spot=spot
+            pid, sel.instrument_key, sel.trading_symbol, qty, direction, sel.ltp,
+            underlying_spot=spot, strike=sel.strike,
         )
         if pos is not None:
             self.trades_today[pid] = self.trades_today.get(pid, 0) + 1
             self.last_skips.pop(pid, None)  # cleared: this pipeline just entered
+
+    def check_profit_target(self) -> bool:
+        """If total profit (realized + unrealized) has reached the daily target,
+        square off everything at market and halt trading for the day. Returns
+        True if the target was hit this call."""
+        target = self.cfg.daily_profit_target
+        if target <= 0 or self._halted:
+            return False
+        realized = self.broker.realized_pnl_today()
+        unrealized, _ = self.broker.mark_to_market()
+        total = realized + unrealized
+        if total >= target:
+            log.warning(
+                "daily profit target reached: total %.2f (realized %.2f + unrealized %.2f) >= %.2f "
+                "— squaring off and halting for the day",
+                total, realized, unrealized, target,
+            )
+            self.square_off_all("profit target")
+            self._halted = True
+            self._halt_reason = f"daily profit target ₹{target:,.0f} reached"
+            return True
+        return False
 
     def _last_index_price(self, pipeline_id: str) -> float | None:
         """Latest completed 1m index close for the position's index (for exit logging)."""
