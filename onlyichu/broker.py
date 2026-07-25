@@ -172,6 +172,18 @@ class BaseBroker:
         """Realized today + current unrealized (mark-to-market)."""
         return self.realized_pnl_today() + self.mark_to_market()[0]
 
+    # -- broker reconciliation (live only; paper is its own source of truth) --
+
+    def reconcile(self) -> list[dict]:
+        """Return per-instrument mismatches between the app book and the real
+        broker. Empty = in sync. Paper mode is always in sync."""
+        return []
+
+    def seed_from_upstox(self) -> int:
+        """Adopt any untracked real positions into the app book so square-off
+        closes what actually exists. No-op for paper. Returns count adopted."""
+        return 0
+
     # -- hooks ----------------------------------------------------------
 
     def _fill_buy(self, instrument_key: str, qty: int, price_hint: float | None) -> float | None:
@@ -296,6 +308,76 @@ class LiveBroker(BaseBroker):
     def __init__(self, cfg: Config, api: UpstoxAPI):
         super().__init__(cfg, cfg.live_trade_log)
         self.api = api
+        self.pending_unconfirmed = False  # a fill we couldn't confirm — force a reconcile
+
+    # -- reconciliation against the real Upstox position book -----------
+
+    def _upstox_net(self) -> dict[str, dict]:
+        """Net (non-zero) Upstox positions keyed by instrument, {qty, avg, symbol}."""
+        out: dict[str, dict] = {}
+        for p in self.api.positions():
+            key = p.get("instrument_token") or p.get("instrument_key")
+            qty = int(p.get("quantity") or 0)
+            if not key or qty == 0:
+                continue
+            out[key] = {
+                "qty": qty,
+                "avg": float(p.get("average_price") or 0.0),
+                "symbol": p.get("tradingsymbol") or p.get("trading_symbol") or key,
+            }
+        return out
+
+    def _app_net(self) -> dict[str, int]:
+        net: dict[str, int] = {}
+        for pos in self.open_positions():
+            net[pos.instrument_key] = net.get(pos.instrument_key, 0) + pos.qty
+        return net
+
+    def reconcile(self) -> list[dict]:
+        try:
+            ups = self._upstox_net()
+        except UpstoxError as exc:
+            log.warning("reconcile: could not fetch Upstox positions: %s", exc)
+            return []  # can't compare — don't raise a false mismatch
+        app = self._app_net()
+        mismatches = []
+        for key in set(ups) | set(app):
+            u = ups.get(key, {}).get("qty", 0)
+            a = app.get(key, 0)
+            if u != a:
+                mismatches.append({
+                    "instrument": key,
+                    "symbol": ups.get(key, {}).get("symbol", key),
+                    "app_qty": a,
+                    "upstox_qty": u,
+                })
+        return mismatches
+
+    def seed_from_upstox(self) -> int:
+        try:
+            ups = self._upstox_net()
+        except UpstoxError as exc:
+            log.warning("seed: could not fetch Upstox positions: %s", exc)
+            return 0
+        app = self._app_net()
+        added = 0
+        for key, info in ups.items():
+            delta = info["qty"] - app.get(key, 0)
+            if delta <= 0:  # already tracked (or app thinks it holds more — reconcile flags that)
+                continue
+            pid = base = f"ADOPTED:{info['symbol']}"
+            i = 1
+            while pid in self.state.positions:
+                i += 1
+                pid = f"{base}#{i}"
+            self.state.positions[pid] = Position(
+                pipeline_id=pid, instrument_key=key, symbol=info["symbol"], qty=delta,
+                entry_price=info["avg"], entry_time=datetime.now().isoformat(timespec="seconds"),
+                direction="LONG",
+            )
+            added += 1
+            log.warning("adopted untracked Upstox position %s x%d @ %.2f", info["symbol"], delta, info["avg"])
+        return added
 
     def _place_and_wait(
         self, instrument_key: str, qty: int, side: str, ltp: float | None
@@ -361,7 +443,13 @@ class LiveBroker(BaseBroker):
                     return float(avg) if avg else (ltp or 0.0)
             except UpstoxError:
                 pass
-            log.error("market retry %s not confirmed — check the order book manually", order_id)
+            # Unknown outcome: the order may still fill at the exchange. Do NOT
+            # assume nothing happened — flag for reconciliation against Upstox.
+            self.pending_unconfirmed = True
+            log.error(
+                "market retry %s not confirmed — flagging for reconcile (may have filled at exchange)",
+                order_id,
+            )
         return None
 
     def _fill_buy(self, instrument_key, qty, price_hint):

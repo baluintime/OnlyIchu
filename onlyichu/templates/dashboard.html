@@ -431,6 +431,7 @@
     <div class="ctrl-msg" id="ctrlMsg"></div>
   </div>
 
+  <div class="banner" id="syncBanner" style="display:none"></div>
   <div class="banner" id="banner"></div>
 
   <div class="paper" id="paperStrip">
@@ -834,6 +835,17 @@ function renderTrading(t) {
   const hasPositions = (trading.positions || []).length > 0;
   $("btnSquare").style.display = trading.running && hasPositions ? "" : "none";
   if (trading.last_error) ctrlMsg("engine error: " + trading.last_error, true);
+
+  // position-reconciliation banner (live mode)
+  const sb = $("syncBanner");
+  if (trading.running && trading.sync_ok === false) {
+    const m = (trading.position_mismatch || []).map(
+      (x) => `${x.symbol}: app ${x.app_qty} vs Upstox ${x.upstox_qty}`).join(" · ");
+    sb.innerHTML = "⚠ POSITION MISMATCH — trading paused until app & Upstox agree" + (m ? "<br><small>" + m + "</small>" : "");
+    sb.style.display = "block";
+  } else {
+    sb.style.display = "none";
+  }
 }
 
 async function post(url, body) {

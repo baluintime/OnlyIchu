@@ -417,12 +417,16 @@ class TradingController:
             "profit_target": None,
             "halted": False,
             "halt_reason": None,
+            "sync_ok": True,
+            "position_mismatch": [],
             "cash": None,
             "skips": [],
         }
         if running and self._engine is not None:
             engine = self._engine
             broker = engine.broker
+            st["sync_ok"] = engine._sync_ok
+            st["position_mismatch"] = engine._position_mismatch
             realized = broker.realized_pnl_today()
             unrealized, detail = broker.mark_to_market()
             st["realized_pnl_today"] = realized

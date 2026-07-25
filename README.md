@@ -139,6 +139,16 @@ Toggles apply instantly (even to a running engine), persist in
 `state/settings.json`, and can also be preset with `trade_enabled: false` per
 instrument in `config.yaml`.
 
+**Live position reconciliation (safety):** in live mode the engine compares its
+own book against Upstox's real positions (`api.positions()`) every cycle. On any
+mismatch — an orphan position, a quantity difference, or an unconfirmed fill — it
+**pauses all new entries** and shows a red *"⚠ POSITION MISMATCH — trading
+paused"* banner listing the diffs; entries resume automatically once the books
+agree. At startup it **seeds the live book from Upstox** (adopting any untracked
+positions), and **square-off reconciles against Upstox first** so it closes what
+actually exists, not the app's stale idea of it. Paper mode is always its own
+source of truth.
+
 **Live P&L and daily profit target:** while the engine runs, the account strip
 shows **Unrealized MTM** and **Total P&L** (realized + unrealized) alongside
 realized, and each open-position chip shows its **strike, entry, current LTP and

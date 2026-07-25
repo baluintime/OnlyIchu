@@ -93,6 +93,8 @@ class Engine:
         self._squared_off = False
         self._halted = False
         self._halt_reason = ""
+        self._sync_ok = True
+        self._position_mismatch: list[dict] = []
         self._stop = threading.Event()
         # latest entry-skip reason per pipeline, surfaced on the dashboard
         self.last_skips: dict[str, dict] = {}
@@ -114,6 +116,14 @@ class Engine:
     # ------------------------------------------------------------ warmup
 
     def warmup(self) -> None:
+        if self.cfg.mode == "live":
+            # seed the live book from Upstox so square-off closes what really exists
+            try:
+                n = self.broker.seed_from_upstox()
+                if n:
+                    log.warning("seeded %d untracked Upstox position(s) into the live book at startup", n)
+            except Exception as exc:  # noqa: BLE001
+                log.warning("startup position seeding failed: %s", exc)
         now = datetime.now(self.tz)
         to_date = (now - timedelta(days=1)).strftime("%Y-%m-%d")
         from_date = (now - timedelta(days=self.cfg.warmup_days)).strftime("%Y-%m-%d")
@@ -188,6 +198,7 @@ class Engine:
                 self.square_off_all("square-off time")
                 self._squared_off = True
             self.poll_once()
+            self.reconcile_positions()
             self.check_profit_target()
             self._stop.wait(self.cfg.poll_interval_seconds)
         if self._stop.is_set():
@@ -247,6 +258,9 @@ class Engine:
         direction = "LONG" if signal.action == ENTER_LONG else "SHORT"
         spot = signal.candle.close
         now_t = self._now().time()
+        if not self._sync_ok:
+            self._record_skip(pid, "position mismatch — trading paused", direction)
+            return
         if self._halted:
             self._record_skip(pid, self._halt_reason or "trading halted", direction)
             return
@@ -303,6 +317,30 @@ class Engine:
             self.trades_today[pid] = self.trades_today.get(pid, 0) + 1
             self.last_skips.pop(pid, None)  # cleared: this pipeline just entered
 
+    def reconcile_positions(self) -> bool:
+        """Live only: compare the app book to Upstox's real positions. On any
+        mismatch (or an unconfirmed fill), pause new entries until it clears.
+        Returns True if in sync."""
+        if self.cfg.mode != "live":
+            self._sync_ok = True
+            return True
+        mismatches = self.broker.reconcile()
+        unconfirmed = getattr(self.broker, "pending_unconfirmed", False)
+        self._position_mismatch = mismatches
+        if mismatches:
+            self._sync_ok = False
+            log.error(
+                "position mismatch vs Upstox — new entries PAUSED until resolved: %s", mismatches
+            )
+        elif unconfirmed:
+            # positions agree now, so the unconfirmed order didn't add anything — clear it
+            self.broker.pending_unconfirmed = False
+            self._sync_ok = True
+            log.info("unconfirmed fill reconciled — Upstox and app book agree; resuming")
+        else:
+            self._sync_ok = True
+        return self._sync_ok
+
     def check_profit_target(self) -> bool:
         """If total profit (realized + unrealized) has reached the daily target,
         square off everything at market and halt trading for the day. Returns
@@ -334,6 +372,12 @@ class Engine:
         return None
 
     def square_off_all(self, reason: str) -> None:
+        # close what actually exists on Upstox, not the app's possibly-stale idea
+        if self.cfg.mode == "live":
+            try:
+                self.broker.seed_from_upstox()
+            except Exception as exc:  # noqa: BLE001
+                log.warning("square-off: could not seed from Upstox first: %s", exc)
         for pos in self.broker.open_positions():
             log.info("square-off (%s): %s %s", reason, pos.pipeline_id, pos.symbol)
             self.broker.exit(
