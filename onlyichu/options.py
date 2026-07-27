@@ -56,6 +56,9 @@ class OptionSelector:
         return bool(self._contracts(underlying_key))
 
     def nearest_expiry(self, underlying_key: str, today: date | None = None) -> str | None:
+        """Nearest unexpired expiry, skipping any within `min_days_to_expiry`
+        days (too close to expiry — high gamma/theta/pin risk) and rolling to
+        the next. Falls back to the farthest available if all are within it."""
         today = today or datetime.now().date()
         expiries = set()
         for c in self._contracts(underlying_key):
@@ -63,7 +66,18 @@ class OptionSelector:
             if exp:
                 expiries.add(str(exp)[:10])
         future = sorted(e for e in expiries if date.fromisoformat(e) >= today)
-        return future[0] if future else None
+        if not future:
+            return None
+        min_days = self.cfg.min_days_to_expiry
+        for e in future:
+            if (date.fromisoformat(e) - today).days > min_days:
+                return e
+        # every listed expiry is within the threshold — use the farthest one
+        log.warning(
+            "%s: all expiries are within %d day(s); using the farthest (%s)",
+            underlying_key, min_days, future[-1],
+        )
+        return future[-1]
 
     def lot_size(self, underlying_key: str, expiry: str) -> int:
         for c in self._contracts(underlying_key):

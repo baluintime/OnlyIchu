@@ -17,8 +17,10 @@ Implements the multi-timeframe execution protocol from
 - **SHORT**: close strictly below all levels → buy an **ITM Put** at the next open.
   Exit the moment a close rises above **any single** level.
 - **Option selection**: delta **0.65–0.75** (target 0.70) from the Upstox option
-  chain greeks, nearest weekly/0DTE expiry, marketable **limit orders** with a
-  narrow tolerance. Thin/untraded strikes are skipped via **liquidity guards** —
+  chain greeks, nearest weekly/0DTE expiry (but `min_days_to_expiry` rolls to the
+  next expiry when the nearest is that many days away or less, avoiding
+  gamma/pin risk right at expiry), marketable **limit orders** with a narrow
+  tolerance. Thin/untraded strikes are skipped via **liquidity guards** —
   `min_volume`, `min_open_interest` and `max_spread_pct` (bid-ask spread as % of
   mid) under `options:` in `config.yaml`. `min_volume` is the important one: an
   untraded (0-volume) strike carries a stale LTP/greeks that mislead delta

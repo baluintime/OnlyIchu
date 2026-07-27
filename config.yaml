@@ -39,6 +39,9 @@ options:
   delta_max: 0.75
   # nearest = nearest unexpired expiry (weekly / 0DTE when available)
   expiry: nearest
+  # Skip an expiry that is this many days away or less and roll to the next one
+  # (avoids the high gamma/theta/pin risk of trading right at expiry). 0 = off.
+  min_days_to_expiry: 2
   # LIMIT places a marketable limit at LTP +/- limit_tolerance_pct; MARKET uses market orders.
   order_type: LIMIT
   limit_tolerance_pct: 0.25

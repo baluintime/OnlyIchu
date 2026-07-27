@@ -45,6 +45,9 @@ class Config:
     delta_min: float = 0.65
     delta_max: float = 0.75
     expiry: str = "nearest"
+    # Skip an expiry that is this many days away or less and roll to the next
+    # (avoids trading right at expiry). 0 = always use the nearest.
+    min_days_to_expiry: int = 0
     order_type: str = "LIMIT"
     limit_tolerance_pct: float = 0.25
     product: str = "I"
@@ -119,6 +122,7 @@ def load_config(path: str = "config.yaml") -> Config:
     cfg.delta_min = float(opts.get("delta_min", cfg.delta_min))
     cfg.delta_max = float(opts.get("delta_max", cfg.delta_max))
     cfg.expiry = opts.get("expiry", cfg.expiry)
+    cfg.min_days_to_expiry = int(opts.get("min_days_to_expiry", cfg.min_days_to_expiry))
     cfg.order_type = str(opts.get("order_type", cfg.order_type)).upper()
     cfg.limit_tolerance_pct = float(opts.get("limit_tolerance_pct", cfg.limit_tolerance_pct))
     cfg.product = opts.get("product", cfg.product)

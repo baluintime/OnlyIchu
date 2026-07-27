@@ -123,6 +123,42 @@ def test_guards_disabled_by_default():
     assert sel is not None and sel.strike == 24800
 
 
+class MultiExpiryAPI:
+    def __init__(self, expiries):
+        self._expiries = expiries
+
+    def option_contracts(self, key):
+        return [{"expiry": e, "lot_size": 75} for e in self._expiries]
+
+
+def test_nearest_expiry_rolls_past_near_ones():
+    from datetime import date, timedelta
+    today = date.today()
+    d1 = (today + timedelta(days=1)).isoformat()   # too close (<=2)
+    d2 = (today + timedelta(days=2)).isoformat()   # too close (<=2)
+    d8 = (today + timedelta(days=8)).isoformat()   # ok
+    sel = OptionSelector(MultiExpiryAPI([d1, d2, d8]), cfg_with(min_days_to_expiry=2))
+    assert sel.nearest_expiry("X") == d8  # skips d1, d2 -> next
+
+
+def test_nearest_expiry_default_takes_nearest():
+    from datetime import date, timedelta
+    today = date.today()
+    d1 = (today + timedelta(days=1)).isoformat()
+    d8 = (today + timedelta(days=8)).isoformat()
+    sel = OptionSelector(MultiExpiryAPI([d1, d8]), cfg_with())  # min_days_to_expiry=0
+    assert sel.nearest_expiry("X") == d1
+
+
+def test_nearest_expiry_all_near_uses_farthest():
+    from datetime import date, timedelta
+    today = date.today()
+    d0 = today.isoformat()
+    d1 = (today + timedelta(days=1)).isoformat()
+    sel = OptionSelector(MultiExpiryAPI([d0, d1]), cfg_with(min_days_to_expiry=2))
+    assert sel.nearest_expiry("X") == d1  # both within threshold -> farthest
+
+
 def test_put_selection_for_short():
     # SHORT -> PE; ITM puts are strikes ABOVE spot
     rows = [
