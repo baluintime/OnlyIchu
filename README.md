@@ -141,6 +141,13 @@ Toggles apply instantly (even to a running engine), persist in
 `state/settings.json`, and can also be preset with `trade_enabled: false` per
 instrument in `config.yaml`.
 
+**In-flight order lock (safety):** the live broker tracks the order it placed
+for each position and, before placing another, checks that order's status. While
+an order is still working it refuses to place a duplicate; if the prior order
+already filled it uses that fill instead of re-ordering. This prevents the
+"one position, multiple sell orders" bug where an exit re-fired each candle while
+a prior sell was still unconfirmed (which could flip a long into a naked short).
+
 **Live position reconciliation (safety):** in live mode the engine compares its
 own book against Upstox's real positions (`api.positions()`) every cycle. On any
 mismatch — an orphan position, a quantity difference, or an unconfirmed fill — it

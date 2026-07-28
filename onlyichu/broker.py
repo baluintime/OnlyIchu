@@ -90,7 +90,7 @@ class BaseBroker:
         if pipeline_id in self.state.positions:
             log.warning("%s already holds a position; entry skipped", pipeline_id)
             return None
-        fill = self._fill_buy(instrument_key, qty, price_hint)
+        fill = self._fill_buy(pipeline_id, instrument_key, qty, price_hint)
         if fill is None:
             return None
         pos = Position(
@@ -186,7 +186,9 @@ class BaseBroker:
 
     # -- hooks ----------------------------------------------------------
 
-    def _fill_buy(self, instrument_key: str, qty: int, price_hint: float | None) -> float | None:
+    def _fill_buy(
+        self, pipeline_id: str, instrument_key: str, qty: int, price_hint: float | None
+    ) -> float | None:
         raise NotImplementedError
 
     def _fill_sell(self, pos: Position, price_hint: float | None) -> float | None:
@@ -243,7 +245,7 @@ class PaperBroker(BaseBroker):
                 log.warning("LTP fetch failed for %s: %s", instrument_key, exc)
         return price_hint
 
-    def _fill_buy(self, instrument_key, qty, price_hint):
+    def _fill_buy(self, pipeline_id, instrument_key, qty, price_hint):
         price = self._quote(instrument_key, price_hint)
         if price is None:
             log.error("paper buy skipped: no price for %s", instrument_key)
@@ -305,10 +307,16 @@ class LiveBroker(BaseBroker):
 
     FILL_POLL_SECONDS = 15
 
+    # Upstox order statuses that mean the order is done (no longer working)
+    _TERMINAL = {"complete", "rejected", "cancelled", "cancelled after market order"}
+
     def __init__(self, cfg: Config, api: UpstoxAPI):
         super().__init__(cfg, cfg.live_trade_log)
         self.api = api
         self.pending_unconfirmed = False  # a fill we couldn't confirm — force a reconcile
+        # per-position in-flight order guard: pipeline_id -> last order_id not yet
+        # confirmed terminal. Prevents firing a duplicate order while one is working.
+        self._pending: dict[str, str] = {}
 
     # -- reconciliation against the real Upstox position book -----------
 
@@ -379,9 +387,49 @@ class LiveBroker(BaseBroker):
             log.warning("adopted untracked Upstox position %s x%d @ %.2f", info["symbol"], delta, info["avg"])
         return added
 
+    def _resolve_pending(self, key: str, side: str) -> tuple[str, float | None]:
+        """Resolve any in-flight order for `key`. Returns (state, fill):
+        state = 'none' (nothing pending), 'working' (still live — do NOT duplicate),
+        'filled' (it already filled — fill price returned), or 'clear' (terminal
+        non-fill — safe to place a new order)."""
+        oid = self._pending.get(key)
+        if not oid:
+            return "none", None
+        try:
+            d = self.api.order_details(oid)
+        except UpstoxError:
+            # can't tell — assume still working so we never place a duplicate blindly
+            log.warning("%s: could not check pending order %s; assuming still working", key, oid)
+            return "working", None
+        status = (d.get("status") or "").lower()
+        if status == "complete":
+            self._pending.pop(key, None)
+            avg = d.get("average_price")
+            log.warning(
+                "%s: prior %s order %s had already FILLED @ %s — using it, not placing a duplicate",
+                key, side, oid, avg,
+            )
+            return "filled", (float(avg) if avg else None)
+        if status in self._TERMINAL:
+            self._pending.pop(key, None)
+            return "clear", None
+        log.warning(
+            "%s: an order (%s, status=%s) is still working — NOT placing a duplicate %s",
+            key, oid, status, side,
+        )
+        return "working", None
+
     def _place_and_wait(
-        self, instrument_key: str, qty: int, side: str, ltp: float | None
+        self, key: str, instrument_key: str, qty: int, side: str, ltp: float | None
     ) -> float | None:
+        # in-flight guard: never stack a second order on a position whose prior
+        # order isn't confirmed terminal (this is what caused the double-sell)
+        state, fill = self._resolve_pending(key, side)
+        if state == "working":
+            return None
+        if state == "filled":
+            return fill if fill is not None else (ltp or 0.0)
+
         order_type = self.cfg.order_type if ltp else "MARKET"
         price = 0.0
         if order_type == "LIMIT" and ltp:
@@ -399,6 +447,7 @@ class LiveBroker(BaseBroker):
         except UpstoxError as exc:
             log.error("order placement failed (%s %s x%d): %s", side, instrument_key, qty, exc)
             return None
+        self._pending[key] = order_id  # now in flight — guards against a duplicate
         log.info("placed %s %s x%d %s@%.2f order_id=%s", side, instrument_key, qty, order_type, price, order_id)
 
         deadline = _time.time() + self.FILL_POLL_SECONDS
@@ -411,9 +460,11 @@ class LiveBroker(BaseBroker):
                 continue
             status = (details.get("status") or "").lower()
             if status == "complete":
+                self._pending.pop(key, None)
                 avg = details.get("average_price")
                 return float(avg) if avg else (price or ltp or 0.0)
             if status in ("rejected", "cancelled"):
+                self._pending.pop(key, None)
                 log.error("order %s %s: %s", order_id, status, details.get("status_message"))
                 return None
             _time.sleep(1)
@@ -423,42 +474,51 @@ class LiveBroker(BaseBroker):
         try:
             self.api.cancel_order(order_id)
         except UpstoxError as exc:
-            log.error("cancel failed for %s: %s — check the order book manually", order_id, exc)
-            return None
-        if order_type == "LIMIT":
-            log.info("retrying %s %s as MARKET", side, instrument_key)
-            try:
-                order_id = self.api.place_order(
-                    instrument_key=instrument_key, quantity=qty,
-                    transaction_type=side, order_type="MARKET", product=self.cfg.product,
-                )
-            except UpstoxError as exc:
-                log.error("market retry failed: %s", exc)
-                return None
-            _time.sleep(2)
-            try:
-                details = self.api.order_details(order_id)
-                if (details.get("status") or "").lower() == "complete":
-                    avg = details.get("average_price")
-                    return float(avg) if avg else (ltp or 0.0)
-            except UpstoxError:
-                pass
-            # Unknown outcome: the order may still fill at the exchange. Do NOT
-            # assume nothing happened — flag for reconciliation against Upstox.
+            # cancel failed — the limit may still be live at the exchange. Keep it
+            # marked pending so we never place a duplicate, and force a reconcile.
             self.pending_unconfirmed = True
-            log.error(
-                "market retry %s not confirmed — flagging for reconcile (may have filled at exchange)",
-                order_id,
+            log.error("cancel failed for %s: %s — kept pending to avoid a duplicate", order_id, exc)
+            return None
+        if order_type != "LIMIT":
+            self._pending.pop(key, None)  # market order we cancelled; nothing resting
+            return None
+
+        log.info("retrying %s %s as MARKET", side, instrument_key)
+        try:
+            order_id = self.api.place_order(
+                instrument_key=instrument_key, quantity=qty,
+                transaction_type=side, order_type="MARKET", product=self.cfg.product,
             )
+        except UpstoxError as exc:
+            self._pending.pop(key, None)  # limit was cancelled, market never placed
+            log.error("market retry failed: %s", exc)
+            return None
+        self._pending[key] = order_id
+        _time.sleep(2)
+        try:
+            details = self.api.order_details(order_id)
+            if (details.get("status") or "").lower() == "complete":
+                self._pending.pop(key, None)
+                avg = details.get("average_price")
+                return float(avg) if avg else (ltp or 0.0)
+        except UpstoxError:
+            pass
+        # Unknown outcome: the order may still fill at the exchange. Leave it
+        # marked pending (blocks duplicates) and flag for reconciliation.
+        self.pending_unconfirmed = True
+        log.error(
+            "market retry %s not confirmed — kept pending, flagging for reconcile "
+            "(may fill at the exchange)", order_id,
+        )
         return None
 
-    def _fill_buy(self, instrument_key, qty, price_hint):
+    def _fill_buy(self, pipeline_id, instrument_key, qty, price_hint):
         ltp = price_hint
         try:
             ltp = self.api.ltp_single(instrument_key) or price_hint
         except UpstoxError:
             pass
-        return self._place_and_wait(instrument_key, qty, "BUY", ltp)
+        return self._place_and_wait(pipeline_id, instrument_key, qty, "BUY", ltp)
 
     def _fill_sell(self, pos, price_hint):
         ltp = price_hint
@@ -466,4 +526,4 @@ class LiveBroker(BaseBroker):
             ltp = self.api.ltp_single(pos.instrument_key) or price_hint
         except UpstoxError:
             pass
-        return self._place_and_wait(pos.instrument_key, pos.qty, "SELL", ltp)
+        return self._place_and_wait(pos.pipeline_id, pos.instrument_key, pos.qty, "SELL", ltp)
