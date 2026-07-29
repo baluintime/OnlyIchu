@@ -15,21 +15,22 @@ class FakeAPI:
     access_token = "x"
     has_token = True
 
-    def __init__(self, positions):
+    def __init__(self, positions, ltp=100.0):
         self._positions = positions
         self.placed = []
         self.n = 0
         self.status = {}
         self.avg = {}
+        self._ltp = ltp
 
     def positions(self):
         return [p for p in self._positions if p["quantity"] != 0]
 
     def ltp(self, keys):
-        return {k: 100.0 for k in keys}
+        return {k: self._ltp for k in keys if self._ltp}
 
     def ltp_single(self, k):
-        return 100.0
+        return self._ltp
 
     def place_order(self, instrument_key, quantity, transaction_type, order_type="LIMIT",
                     price=0.0, product="I", tag="onlyichu"):
@@ -102,6 +103,37 @@ def test_phantom_dropped_when_upstox_flat(tmp_path):
     assert e.reconcile_positions() is True  # phantom dropped -> in sync
     assert e.broker.open_positions() == []
     assert e.api.placed == []  # nothing sold (already closed on Upstox)
+
+
+def test_orphan_zero_avg_adopts_at_ltp(tmp_path):
+    # Upstox avg is 0 (not yet populated) -> adopt at the live LTP, never at 0
+    e = make_engine(tmp_path, [upos("NSE_FO|1", 65, 0.0, "NIFTY 24050 CE")])
+    e.api._ltp = 250.0
+    warm(e, up=True)
+    assert e.reconcile_positions() is True
+    held = [p for p in e.broker.open_positions() if p.instrument_key == "NSE_FO|1"]
+    assert held and held[0].entry_price == 250.0  # not 0
+
+
+def test_orphan_no_price_squared_not_adopted(tmp_path):
+    # avg 0 AND no LTP -> cannot price it -> square off instead of adopting at 0
+    e = make_engine(tmp_path, [upos("NSE_FO|1", 65, 0.0, "NIFTY 24050 CE")], )
+    e.api._ltp = 0.0
+    warm(e, up=True)
+    e.reconcile_positions()
+    assert e.api.placed and e.api.placed[0][0] == "SELL"  # squared off, never adopted at 0
+    assert e.broker.open_positions() == []
+
+
+def test_recent_order_defers_heal(tmp_path):
+    # if we just traded this instrument, don't act again this cycle (no double-sell)
+    e = make_engine(tmp_path, [upos("NSE_FO|1", 65, 240.0, "NIFTY 24050 CE")])
+    warm(e, up=False)  # bearish -> would normally square off
+    import time as _t
+    e.broker._recent_orders["NSE_FO|1"] = _t.time()  # we just traded it
+    e.reconcile_positions()
+    assert e.api.placed == []              # deferred — no square-off fired
+    assert e._sync_ok is False             # stays paused one cycle until Upstox reflects
 
 
 def test_paper_mode_never_paused(tmp_path):

@@ -127,6 +127,15 @@ class BaseBroker:
         if fill is None:
             return None
         pnl = pos.pnl(fill)
+        # sanity guard: a non-positive entry price means the entry was never
+        # priced (e.g. an adopted position with a missing avg) — its PnL is
+        # meaningless, so record 0 rather than fabricate a huge number.
+        if pos.entry_price is None or pos.entry_price <= 0:
+            log.warning(
+                "%s exit: entry price is %s — PnL untrustworthy, recording 0 (fill %.2f x%d)",
+                pipeline_id, pos.entry_price, fill, pos.qty,
+            )
+            pnl = 0.0
         self._roll_pnl_date()
         self.state.realized_pnl_today += pnl
         del self.state.positions[pipeline_id]
@@ -178,6 +187,10 @@ class BaseBroker:
         """Return per-instrument mismatches between the app book and the real
         broker. Empty = in sync. Paper mode is always in sync."""
         return []
+
+    def recently_ordered(self, instrument_key: str, within: float = 20.0) -> bool:
+        """Whether we placed an order on this instrument very recently (live only)."""
+        return False
 
     def seed_from_upstox(self) -> int:
         """Adopt any untracked real positions into the app book so square-off
@@ -357,6 +370,7 @@ class LiveBroker(BaseBroker):
     configured. Fill price is read back from order details."""
 
     FILL_POLL_SECONDS = 15
+    MARKET_CONFIRM_SECONDS = 6  # how long to poll for the market retry to confirm before giving up
 
     # Upstox order statuses that mean the order is done (no longer working)
     _TERMINAL = {"complete", "rejected", "cancelled", "cancelled after market order"}
@@ -368,6 +382,13 @@ class LiveBroker(BaseBroker):
         # per-position in-flight order guard: pipeline_id -> last order_id not yet
         # confirmed terminal. Prevents firing a duplicate order while one is working.
         self._pending: dict[str, str] = {}
+        # instrument_key -> ts of the last order we placed on it. Lets reconcile
+        # avoid squaring off an instrument we just traded before Upstox reflects it.
+        self._recent_orders: dict[str, float] = {}
+
+    def recently_ordered(self, instrument_key: str, within: float = 20.0) -> bool:
+        ts = self._recent_orders.get(instrument_key)
+        return ts is not None and (_time.time() - ts) < within
 
     # -- reconciliation against the real Upstox position book -----------
 
@@ -500,6 +521,7 @@ class LiveBroker(BaseBroker):
             log.error("order placement failed (%s %s x%d): %s", side, instrument_key, qty, exc)
             return None
         self._pending[key] = order_id  # now in flight — guards against a duplicate
+        self._recent_orders[instrument_key] = _time.time()
         log.info("placed %s %s x%d %s@%.2f order_id=%s", side, instrument_key, qty, order_type, price, order_id)
 
         deadline = _time.time() + self.FILL_POLL_SECONDS
@@ -546,21 +568,30 @@ class LiveBroker(BaseBroker):
             log.error("market retry failed: %s", exc)
             return None
         self._pending[key] = order_id
-        _time.sleep(2)
-        try:
-            details = self.api.order_details(order_id)
-            if (details.get("status") or "").lower() == "complete":
-                self._pending.pop(key, None)
-                avg = details.get("average_price")
-                return float(avg) if avg else (ltp or 0.0)
-        except UpstoxError:
-            pass
+        self._recent_orders[instrument_key] = _time.time()
+        # poll for the market fill for up to MARKET_CONFIRM_SECONDS
+        deadline2 = _time.time() + self.MARKET_CONFIRM_SECONDS
+        while _time.time() < deadline2:
+            try:
+                details = self.api.order_details(order_id)
+                st = (details.get("status") or "").lower()
+                if st == "complete":
+                    self._pending.pop(key, None)
+                    avg = details.get("average_price")
+                    return float(avg) if avg else (ltp or 0.0)
+                if st in ("rejected", "cancelled"):
+                    self._pending.pop(key, None)
+                    log.error("market retry %s %s: %s", order_id, st, details.get("status_message"))
+                    return None
+            except UpstoxError:
+                pass
+            _time.sleep(1)
         # Unknown outcome: the order may still fill at the exchange. Leave it
         # marked pending (blocks duplicates) and flag for reconciliation.
         self.pending_unconfirmed = True
         log.error(
-            "market retry %s not confirmed — kept pending, flagging for reconcile "
-            "(may fill at the exchange)", order_id,
+            "market retry %s not confirmed in %ds — kept pending, flagging for reconcile "
+            "(may fill at the exchange)", order_id, self.MARKET_CONFIRM_SECONDS,
         )
         return None
 

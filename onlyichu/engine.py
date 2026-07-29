@@ -329,10 +329,25 @@ class Engine:
     def _heal_orphan(self, key: str, symbol: str, qty: int, avg: float) -> str:
         """An untracked Upstox position. If a flat pipeline's current signal still
         supports holding it, adopt it (strategy will manage the exit); otherwise
-        square it off."""
+        square it off. Never adopts without a real entry price, and never squares
+        off an instrument we just traded (avoids a double-sell race)."""
+        # Fix 2: if we placed an order on this instrument moments ago, its result
+        # hasn't reflected on Upstox yet — wait a cycle rather than acting again.
+        if self.broker.recently_ordered(key):
+            log.info("reconcile: %s traded very recently — deferring heal one cycle", symbol)
+            return "wait"
+
         direction = "LONG" if symbol.strip().upper().endswith("CE") else "SHORT"
+        # Fix 1: resolve a trustworthy entry price; never adopt/record at 0.
+        entry = float(avg) if avg and avg > 0 else 0.0
+        if entry <= 0:
+            try:
+                entry = float(self.api.ltp_single(key) or 0.0)
+            except Exception:  # noqa: BLE001
+                entry = 0.0
+
         runner = self._runner_for_symbol(symbol)
-        if runner is not None:
+        if runner is not None and entry > 0:
             for pipeline in runner.pipelines.values():
                 pid = pipeline.pipeline_id
                 if self.broker.position(pid) is not None or not pipeline.series.candles:
@@ -343,10 +358,10 @@ class Engine:
                 close = pipeline.series.candles[-1].close
                 still_valid = (not long_exit(close, state)) if direction == "LONG" else (not short_exit(close, state))
                 if still_valid:
-                    self.broker.adopt_position(pid, key, symbol, qty, avg, direction)
+                    self.broker.adopt_position(pid, key, symbol, qty, entry, direction)
                     return "kept"
-        # no pipeline can manage it — close the untracked exposure
-        self.broker.square_off_instrument(key, symbol, qty, price_hint=avg or None)
+        # no pipeline can manage it (or no valid price to adopt at) — close it
+        self.broker.square_off_instrument(key, symbol, qty, price_hint=(entry or None))
         return "squared"
 
     def _drop_phantom(self, key: str, excess: int) -> None:

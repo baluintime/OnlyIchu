@@ -19,6 +19,21 @@ def make_cfg(tmp_path) -> Config:
     return cfg
 
 
+def test_exit_with_zero_entry_price_records_zero_pnl(tmp_path):
+    # a position with no real entry price (e.g. a badly-adopted orphan) must not
+    # fabricate a huge PnL on exit
+    from onlyichu.broker import Position
+
+    cfg = make_cfg(tmp_path)
+    api = FakeAPI({"NSE_FO|9": 1433.75})
+    broker = PaperBroker(cfg, api)
+    broker.state.positions["X:1m"] = Position(
+        "X:1m", "NSE_FO|9", "BANKNIFTY 58300 PE", 30, 0.0, "t", "SHORT")
+    pnl = broker.exit("X:1m", price_hint=1433.75)
+    assert pnl == 0.0  # not (1433.75 - 0) * 30 = 43012.5
+    assert broker.realized_pnl_today() == 0.0
+
+
 def test_trade_log_records_index_price(tmp_path):
     import csv
 
