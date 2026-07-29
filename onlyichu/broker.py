@@ -184,6 +184,57 @@ class BaseBroker:
         closes what actually exists. No-op for paper. Returns count adopted."""
         return 0
 
+    def adopt_position(
+        self, pipeline_id: str, instrument_key: str, symbol: str, qty: int,
+        entry_price: float, direction: str, strike: float | None = None,
+    ) -> Position:
+        """Attach an untracked (broker-side) position to a pipeline so the
+        strategy manages its exit. Overwrites any existing entry for the id."""
+        pos = Position(
+            pipeline_id=pipeline_id, instrument_key=instrument_key, symbol=symbol, qty=qty,
+            entry_price=entry_price, entry_time=datetime.now().isoformat(timespec="seconds"),
+            direction=direction, strike=strike,
+        )
+        self.state.positions[pipeline_id] = pos
+        self._persist()
+        log.warning("reconcile: adopted %s x%d @ %.2f into %s (%s) — strategy will manage it",
+                    symbol, qty, entry_price, pipeline_id, direction)
+        return pos
+
+    def drop_position(self, pipeline_id: str, reason: str = "closed externally") -> None:
+        """Remove a phantom position the broker no longer holds (closed outside
+        the app), logging it so the record shows why."""
+        pos = self.state.positions.pop(pipeline_id, None)
+        if pos is not None:
+            self._log_trade(f"EXIT {reason}", pos, pos.entry_price, 0.0, index_price=pos.entry_spot)
+            self._persist()
+            log.warning("reconcile: dropped phantom %s (%s) — %s", pos.symbol, pipeline_id, reason)
+
+    def square_off_instrument(
+        self, instrument_key: str, symbol: str, qty: int, price_hint: float | None = None
+    ) -> float | None:
+        """Close an untracked broker position that no pipeline can manage. Uses a
+        transient position (never added to the book) so a failed sell leaves the
+        book unchanged (the orphan stays flagged rather than becoming a phantom)."""
+        log.warning("reconcile: no pipeline can manage %s x%d — squaring it off", symbol, qty)
+        tmp = Position(
+            pipeline_id=f"ORPHAN:{symbol}", instrument_key=instrument_key, symbol=symbol, qty=qty,
+            entry_price=price_hint or 0.0, entry_time=datetime.now().isoformat(timespec="seconds"),
+            direction="LONG",
+        )
+        try:
+            fill = self._fill_sell(tmp, price_hint)
+        except Exception as exc:  # noqa: BLE001
+            log.error("reconcile: square-off of %s failed: %s", symbol, exc)
+            return None
+        if fill is None:
+            log.error("reconcile: square-off of %s did not fill; still untracked", symbol)
+            return None
+        self._log_trade("EXIT reconcile:orphan", tmp, fill, 0.0)
+        self._persist()
+        log.warning("reconcile: squared off untracked %s x%d @ %.2f", symbol, qty, fill)
+        return fill
+
     # -- hooks ----------------------------------------------------------
 
     def _fill_buy(
@@ -358,6 +409,7 @@ class LiveBroker(BaseBroker):
                     "symbol": ups.get(key, {}).get("symbol", key),
                     "app_qty": a,
                     "upstox_qty": u,
+                    "avg": ups.get(key, {}).get("avg", 0.0),
                 })
         return mismatches
 

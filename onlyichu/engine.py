@@ -23,7 +23,7 @@ from datetime import datetime, time, timedelta
 from .broker import BaseBroker, LiveBroker, PaperBroker
 from .candles import Candle, CandleSeries, TimeframeAggregator
 from .config import Config, IndexConfig
-from .ichimoku import IchimokuParams
+from .ichimoku import IchimokuParams, compute_state, long_exit, short_exit
 from .options import OptionSelector
 from .strategy import ENTER_LONG, EXIT, Pipeline, Signal
 from .tzutil import get_zone
@@ -317,26 +317,75 @@ class Engine:
             self.trades_today[pid] = self.trades_today.get(pid, 0) + 1
             self.last_skips.pop(pid, None)  # cleared: this pipeline just entered
 
+    def _runner_for_symbol(self, symbol: str) -> "IndexRunner | None":
+        """Map an option trading symbol (e.g. 'BANKNIFTY 56100 CE') to its index runner."""
+        norm = symbol.replace(" ", "").upper()
+        # longest index name first so NIFTY doesn't shadow NIFTYNXT50 / BANKNIFTY
+        for runner in sorted(self.runners, key=lambda r: -len(r.index.name)):
+            if norm.startswith(runner.index.name.replace(" ", "").upper()):
+                return runner
+        return None
+
+    def _heal_orphan(self, key: str, symbol: str, qty: int, avg: float) -> str:
+        """An untracked Upstox position. If a flat pipeline's current signal still
+        supports holding it, adopt it (strategy will manage the exit); otherwise
+        square it off."""
+        direction = "LONG" if symbol.strip().upper().endswith("CE") else "SHORT"
+        runner = self._runner_for_symbol(symbol)
+        if runner is not None:
+            for pipeline in runner.pipelines.values():
+                pid = pipeline.pipeline_id
+                if self.broker.position(pid) is not None or not pipeline.series.candles:
+                    continue
+                state = compute_state(pipeline.series.highs, pipeline.series.lows, self.params)
+                if state is None:
+                    continue
+                close = pipeline.series.candles[-1].close
+                still_valid = (not long_exit(close, state)) if direction == "LONG" else (not short_exit(close, state))
+                if still_valid:
+                    self.broker.adopt_position(pid, key, symbol, qty, avg, direction)
+                    return "kept"
+        # no pipeline can manage it — close the untracked exposure
+        self.broker.square_off_instrument(key, symbol, qty, price_hint=avg or None)
+        return "squared"
+
+    def _drop_phantom(self, key: str, excess: int) -> None:
+        """App holds more than Upstox — those were closed outside the app; drop them."""
+        for pos in list(self.broker.open_positions()):
+            if excess <= 0:
+                break
+            if pos.instrument_key == key:
+                self.broker.drop_position(pos.pipeline_id, "closed externally (Upstox flat)")
+                excess -= pos.qty
+
     def reconcile_positions(self) -> bool:
-        """Live only: compare the app book to Upstox's real positions. On any
-        mismatch (or an unconfirmed fill), pause new entries until it clears.
-        Returns True if in sync."""
+        """Live only: compare the app book to Upstox's real positions and
+        self-heal — adopt an orphan the strategy would still hold, square off one
+        it wouldn't, drop phantoms Upstox has closed. Pause entries only if a
+        mismatch remains after healing. Returns True if in sync."""
         if self.cfg.mode != "live":
             self._sync_ok = True
             return True
         mismatches = self.broker.reconcile()
+        for m in mismatches:
+            try:
+                if m["upstox_qty"] > m["app_qty"]:
+                    self._heal_orphan(m["instrument"], m["symbol"], m["upstox_qty"] - m["app_qty"], m.get("avg", 0.0))
+                elif m["app_qty"] > m["upstox_qty"]:
+                    self._drop_phantom(m["instrument"], m["app_qty"] - m["upstox_qty"])
+            except Exception as exc:  # noqa: BLE001 - healing is best-effort; stay paused if it fails
+                log.error("reconcile heal failed for %s: %s", m.get("symbol"), exc)
+        if mismatches:
+            mismatches = self.broker.reconcile()  # re-check after healing
         unconfirmed = getattr(self.broker, "pending_unconfirmed", False)
         self._position_mismatch = mismatches
         if mismatches:
             self._sync_ok = False
-            log.error(
-                "position mismatch vs Upstox — new entries PAUSED until resolved: %s", mismatches
-            )
+            log.error("position mismatch remains after heal — entries PAUSED: %s", mismatches)
         elif unconfirmed:
-            # positions agree now, so the unconfirmed order didn't add anything — clear it
             self.broker.pending_unconfirmed = False
             self._sync_ok = True
-            log.info("unconfirmed fill reconciled — Upstox and app book agree; resuming")
+            log.info("unconfirmed fill reconciled — Upstox and app agree; resuming")
         else:
             self._sync_ok = True
         return self._sync_ok

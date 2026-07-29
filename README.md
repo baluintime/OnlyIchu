@@ -148,14 +148,19 @@ already filled it uses that fill instead of re-ordering. This prevents the
 "one position, multiple sell orders" bug where an exit re-fired each candle while
 a prior sell was still unconfirmed (which could flip a long into a naked short).
 
-**Live position reconciliation (safety):** in live mode the engine compares its
-own book against Upstox's real positions (`api.positions()`) every cycle. On any
-mismatch — an orphan position, a quantity difference, or an unconfirmed fill — it
-**pauses all new entries** and shows a red *"⚠ POSITION MISMATCH — trading
-paused"* banner listing the diffs; entries resume automatically once the books
-agree. At startup it **seeds the live book from Upstox** (adopting any untracked
-positions), and **square-off reconciles against Upstox first** so it closes what
-actually exists, not the app's stale idea of it. Paper mode is always its own
+**Live position reconciliation (self-healing):** in live mode the engine compares
+its own book against Upstox's real positions (`api.positions()`) every cycle and
+resolves any drift automatically:
+- **Orphan** (Upstox holds a position the app doesn't — e.g. an entry that filled
+  but came back unconfirmed): if a flat pipeline's current Ichimoku signal still
+  supports holding it, the position is **adopted** so the strategy manages its
+  exit; otherwise it's **squared off** at market.
+- **Phantom** (the app holds a position Upstox has already closed — e.g. after a
+  manual square-off): it's **dropped** from the book.
+
+Only if a mismatch remains after healing does it **pause new entries** and show a
+red banner naming the instrument. At startup it seeds the live book from Upstox,
+and square-off reconciles against Upstox first. Paper mode is always its own
 source of truth.
 
 **Live P&L and daily profit target:** while the engine runs, the account strip
