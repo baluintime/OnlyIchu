@@ -19,6 +19,30 @@ def make_cfg(tmp_path) -> Config:
     return cfg
 
 
+def test_partial_exit_sells_whole_lots(tmp_path):
+    cfg = make_cfg(tmp_path)
+    api = FakeAPI({"NSE_FO|1": 100.0})  # paper fills at live LTP
+    broker = PaperBroker(cfg, api)
+    # 2 lots (lot size 60 -> qty 120); +20% -> partial 50% = sell 1 lot, keep 1
+    broker.enter("NIFTY:1m", "NSE_FO|1", "NIFTY CE", 120, "LONG", None, lot_size=60)
+    api.prices["NSE_FO|1"] = 120.0
+    pnl = broker.partial_exit("NIFTY:1m", 0.5, price_hint=120.0)
+    assert pnl == (120.0 - 100.0) * 60          # sold 1 lot (60)
+    pos = broker.position("NIFTY:1m")
+    assert pos.qty == 60 and pos.partial_taken is True
+    # second call is a no-op (already taken)
+    assert broker.partial_exit("NIFTY:1m", 0.5, price_hint=120.0) is None
+
+
+def test_partial_exit_single_lot_noop(tmp_path):
+    cfg = make_cfg(tmp_path)
+    api = FakeAPI({"NSE_FO|1": 120.0})
+    broker = PaperBroker(cfg, api)
+    broker.enter("NIFTY:1m", "NSE_FO|1", "NIFTY CE", 65, "LONG", 100.0, lot_size=65)  # 1 lot
+    assert broker.partial_exit("NIFTY:1m", 0.5, price_hint=120.0) is None
+    assert broker.position("NIFTY:1m").qty == 65  # untouched
+
+
 def test_exit_with_zero_entry_price_records_zero_pnl(tmp_path):
     # a position with no real entry price (e.g. a badly-adopted orphan) must not
     # fabricate a huge PnL on exit

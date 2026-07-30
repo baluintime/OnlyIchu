@@ -93,3 +93,32 @@ def short_entry(close: float, s: IchimokuState) -> bool:
 def short_exit(close: float, s: IchimokuState) -> bool:
     """Close strictly above any single level."""
     return any(close > level for level in s.levels)
+
+
+# --------------------------------------------------------------------- MACD
+
+
+def _ema(values: list[float], period: int) -> list[float]:
+    """EMA series (length len(values) - period + 1), seeded with the SMA."""
+    if len(values) < period:
+        return []
+    k = 2.0 / (period + 1)
+    ema = [sum(values[:period]) / period]
+    for v in values[period:]:
+        ema.append(v * k + ema[-1] * (1 - k))
+    return ema
+
+
+def macd_hist(closes: list[float], fast: int = 12, slow: int = 26, signal: int = 9) -> float | None:
+    """Latest MACD histogram (MACD line − signal line), or None if not enough data.
+    Histogram > 0 ⟺ MACD line above its signal line."""
+    if len(closes) < slow + signal:
+        return None
+    ema_fast = _ema(closes, fast)
+    ema_slow = _ema(closes, slow)
+    n = len(ema_slow)
+    macd_line = [f - s for f, s in zip(ema_fast[-n:], ema_slow)]
+    sig = _ema(macd_line, signal)
+    if not sig:
+        return None
+    return macd_line[-1] - sig[-1]

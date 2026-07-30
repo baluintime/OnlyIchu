@@ -3,10 +3,11 @@ from datetime import datetime, timedelta, timezone
 from onlyichu.candles import Candle
 from onlyichu.config import Config, IndexConfig
 from onlyichu.ichimoku import IchimokuParams
+from onlyichu.strategy import StrategyConfig
 from onlyichu.web import DashboardService, analyze_series, create_app
 
 IST = timezone(timedelta(hours=5, minutes=30))
-PARAMS = IchimokuParams(tenkan=2, kijun=3, senkou_b=4, displacement=2)
+PARAMS = StrategyConfig(ich=IchimokuParams(tenkan=2, kijun=3, senkou_b=4, displacement=2))
 
 
 def trending(n, start, step, t0=None):

@@ -41,6 +41,22 @@ class Config:
     senkou_b: int = 52
     displacement: int = 26
 
+    # --- optimization: entry filters (0/false disables each) ---
+    use_chikou_filter: bool = False   # Chikou span clear of price `chikou_period` ago
+    chikou_period: int = 26
+    use_macd_filter: bool = False     # MACD histogram sign must confirm the direction
+    macd_fast: int = 12
+    macd_slow: int = 26
+    macd_signal: int = 9
+    min_cloud_thickness: float = 0.0  # reject when |SpanA-SpanB| < this (index points)
+    # --- optimization: exit restructuring ---
+    # 'kijun' = soft trailing stop on Kijun close + hard stop at the opposite Kumo edge;
+    # 'any_level' = original (exit on a close past any one of the four lines).
+    exit_mode: str = "any_level"
+    # partial profit: close this fraction once the option premium gains partial_target_pct.
+    partial_target_pct: float = 0.0   # 0 disables
+    partial_exit_fraction: float = 0.5
+
     target_delta: float = 0.70
     delta_min: float = 0.65
     delta_max: float = 0.75
@@ -116,6 +132,16 @@ def load_config(path: str = "config.yaml") -> Config:
     cfg.kijun = int(strat.get("kijun", cfg.kijun))
     cfg.senkou_b = int(strat.get("senkou_b", cfg.senkou_b))
     cfg.displacement = int(strat.get("displacement", cfg.displacement))
+    cfg.use_chikou_filter = bool(strat.get("use_chikou_filter", cfg.use_chikou_filter))
+    cfg.chikou_period = int(strat.get("chikou_period", cfg.chikou_period))
+    cfg.use_macd_filter = bool(strat.get("use_macd_filter", cfg.use_macd_filter))
+    cfg.macd_fast = int(strat.get("macd_fast", cfg.macd_fast))
+    cfg.macd_slow = int(strat.get("macd_slow", cfg.macd_slow))
+    cfg.macd_signal = int(strat.get("macd_signal", cfg.macd_signal))
+    cfg.min_cloud_thickness = float(strat.get("min_cloud_thickness", cfg.min_cloud_thickness))
+    cfg.exit_mode = str(strat.get("exit_mode", cfg.exit_mode)).lower()
+    cfg.partial_target_pct = float(strat.get("partial_target_pct", cfg.partial_target_pct))
+    cfg.partial_exit_fraction = float(strat.get("partial_exit_fraction", cfg.partial_exit_fraction))
 
     opts = raw.get("options", {}) or {}
     cfg.target_delta = float(opts.get("target_delta", cfg.target_delta))

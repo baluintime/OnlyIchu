@@ -7,15 +7,25 @@ trading** (real orders) modes.
 Implements the multi-timeframe execution protocol from
 `ichimoku_cloud_options_strategy.pdf`:
 
-- Ichimoku Cloud (Tenkan 9 / Kijun 26 / Senkou B 52 / displacement 26) evaluated
-  **strictly on candle closes** — in-progress candles are ignored.
+- Ichimoku Cloud evaluated **strictly on candle closes** — in-progress candles are
+  ignored. Periods are configurable; the shipped default is the intraday
+  noise-filter profile **Tenkan 12 / Kijun 24 / Senkou B 120 / displacement 24**
+  (`strategy:` in `config.yaml` also documents the Standard 9/26/52/26 and Fast
+  7/22/44/22 profiles).
 - **Two independent pipelines per index**: 1-minute and 5-minute, each with its own
   calculations, entries and exits.
 - **LONG**: close strictly above Tenkan, Kijun, Span A, Span B (and the whole cloud)
   → buy an **ITM Call** at the open of the next candle.
-  Exit the moment a close drops below **any single** level.
 - **SHORT**: close strictly below all levels → buy an **ITM Put** at the next open.
-  Exit the moment a close rises above **any single** level.
+- **Entry filters** (optional, on by default; reduce false breakouts in chop):
+  **Chikou span** clear of price N candles ago, **MACD(12,26,9) histogram**
+  confirming direction, and a **minimum cloud thickness** gate.
+- **Tiered exit** (`exit_mode: kijun`): soft trailing stop on a **Kijun close**
+  plus a hard stop at the **opposite Kumo edge** — instead of exiting on any single
+  line, which whipsaws on fast timeframes. Set `exit_mode: any_level` for the
+  original rule.
+- **Partial profit-taking**: book `partial_exit_fraction` (50%) of the position
+  once the option premium gains `partial_target_pct` (15%); needs ≥2 lots.
 - **Option selection**: delta **0.65–0.75** (target 0.70) from the Upstox option
   chain greeks, nearest weekly/0DTE expiry (but `min_days_to_expiry` rolls to the
   next expiry when the nearest is that many days away or less, avoiding

@@ -23,7 +23,7 @@ from . import settings as settings_mod
 
 from .candles import Candle, TimeframeAggregator
 from .config import Config, IndexConfig
-from .ichimoku import IchimokuParams, compute_state, long_entry, short_entry
+from .strategy import StrategyConfig, evaluate
 from .tzutil import get_zone
 from .upstox_api import UpstoxAPI, UpstoxError
 
@@ -37,30 +37,27 @@ LEVEL_NAMES = [
 ]
 
 
-def analyze_series(candles: list[Candle], params: IchimokuParams) -> dict | None:
-    """Ichimoku snapshot of the latest completed candle of a series."""
+def analyze_series(candles: list[Candle], sc: StrategyConfig) -> dict | None:
+    """Snapshot of the latest completed candle using the full strategy rules
+    (Ichimoku + optional MACD / Chikou / cloud-thickness filters)."""
     if not candles:
         return None
     highs = [c.high for c in candles]
     lows = [c.low for c in candles]
+    closes = [c.close for c in candles]
     last = candles[-1]
-    state = compute_state(highs, lows, params)
-    if state is None:
+    ev = evaluate(highs, lows, closes, sc)
+    if ev is None:
         return {
             "ready": False,
             "candles": len(candles),
-            "needed": params.min_candles,
+            "needed": sc.min_candles,
             "close": last.close,
             "candle_time": last.ts.strftime("%H:%M"),
             "candle_date": last.ts.strftime("%Y-%m-%d"),
         }
-    close = last.close
-    if long_entry(close, state):
-        signal = "LONG"
-    elif short_entry(close, state):
-        signal = "SHORT"
-    else:
-        signal = "NEUTRAL"
+    state = ev.state
+    close = ev.close
     if close > state.cloud_top:
         zone = "ABOVE CLOUD"
     elif close < state.cloud_bottom:
@@ -85,9 +82,18 @@ def analyze_series(candles: list[Candle], params: IchimokuParams) -> dict | None
         "close": close,
         "candle_time": last.ts.strftime("%H:%M"),
         "candle_date": last.ts.strftime("%Y-%m-%d"),
-        "signal": signal,
+        "signal": ev.signal,
         "zone": zone,
         "levels": levels,
+        "macd_hist": round(ev.macd_hist, 2) if ev.macd_hist is not None else None,
+        "thickness": round(ev.thickness, 2) if ev.thickness is not None else None,
+        "filters": {
+            "macd": None if not sc.use_macd else (ev.macd_hist is not None and (
+                ev.macd_hist > 0 if ev.signal != "SHORT" else ev.macd_hist < 0)),
+            "chikou": None if not sc.use_chikou else (
+                ev.chikou_ok_long if ev.signal != "SHORT" else ev.chikou_ok_short),
+            "thickness_ok": ev.thickness_ok,
+        },
         "cloud": {
             "top": round(state.cloud_top, 2),
             "bottom": round(state.cloud_bottom, 2),
@@ -107,7 +113,9 @@ class DashboardService:
         self.cfg = cfg
         self.api = api
         self.tz = get_zone(cfg.timezone)
-        self.params = IchimokuParams(cfg.tenkan, cfg.kijun, cfg.senkou_b, cfg.displacement)
+        from .strategy import build_strategy_config
+        self.sc = build_strategy_config(cfg)
+        self.params = self.sc.ich
         self.ttl = max(3.0, cfg.web_refresh_seconds / 2.0)
         self._lock = threading.Lock()
         self._cached: dict | None = None
@@ -250,7 +258,7 @@ class DashboardService:
                 else:
                     agg = TimeframeAggregator(tf)
                     series = [done for c in one_min if (done := agg.feed(c))]
-                analysis = analyze_series(series, self.params) or {"ready": False, "candles": 0}
+                analysis = analyze_series(series, self.sc) or {"ready": False, "candles": 0}
                 analysis["timeframe"] = f"{tf}m"
                 entry["pipelines"].append(analysis)
             indices_payload.append(entry)

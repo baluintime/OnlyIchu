@@ -23,9 +23,9 @@ from datetime import datetime, time, timedelta
 from .broker import BaseBroker, LiveBroker, PaperBroker
 from .candles import Candle, CandleSeries, TimeframeAggregator
 from .config import Config, IndexConfig
-from .ichimoku import IchimokuParams, compute_state, long_exit, short_exit
+from .ichimoku import compute_state, long_exit, short_exit
 from .options import OptionSelector
-from .strategy import ENTER_LONG, EXIT, Pipeline, Signal
+from .strategy import ENTER_LONG, EXIT, Pipeline, Signal, StrategyConfig, build_strategy_config
 from .tzutil import get_zone
 from .upstox_api import UpstoxAPI, UpstoxError
 
@@ -35,7 +35,7 @@ log = logging.getLogger(__name__)
 class IndexRunner:
     """All per-index state: 1m feed tracking, aggregators and pipelines."""
 
-    def __init__(self, index: IndexConfig, cfg: Config, params: IchimokuParams):
+    def __init__(self, index: IndexConfig, cfg: Config, sc: "StrategyConfig"):
         self.index = index
         self.cfg = cfg
         self.one_min = CandleSeries()  # dedupe/tracking of raw 1m feed
@@ -43,7 +43,7 @@ class IndexRunner:
             tf: TimeframeAggregator(tf) for tf in cfg.timeframes_minutes if tf != 1
         }
         self.pipelines: dict[int, Pipeline] = {
-            tf: Pipeline(index.name, tf, params) for tf in cfg.timeframes_minutes
+            tf: Pipeline(index.name, tf, sc) for tf in cfg.timeframes_minutes
         }
         # opening-range breakout gate (per index, per day)
         self.or_date = None  # type: ignore[assignment]
@@ -83,12 +83,13 @@ class Engine:
         self.cfg = cfg
         self.api = api
         self.tz = get_zone(cfg.timezone)
-        self.params = IchimokuParams(cfg.tenkan, cfg.kijun, cfg.senkou_b, cfg.displacement)
+        self.sc = build_strategy_config(cfg)
+        self.params = self.sc.ich
         self.selector = OptionSelector(api, cfg)
         self.broker: BaseBroker = (
             LiveBroker(cfg, api) if cfg.mode == "live" else PaperBroker(cfg, api)
         )
-        self.runners = [IndexRunner(ix, cfg, self.params) for ix in cfg.enabled_instruments]
+        self.runners = [IndexRunner(ix, cfg, self.sc) for ix in cfg.enabled_instruments]
         self.trades_today: dict[str, int] = {}
         self._squared_off = False
         self._halted = False
@@ -199,6 +200,7 @@ class Engine:
                 self._squared_off = True
             self.poll_once()
             self.reconcile_positions()
+            self.check_partial_targets()
             self.check_profit_target()
             self._stop.wait(self.cfg.poll_interval_seconds)
         if self._stop.is_set():
@@ -311,7 +313,7 @@ class Engine:
         )
         pos = self.broker.enter(
             pid, sel.instrument_key, sel.trading_symbol, qty, direction, sel.ltp,
-            underlying_spot=spot, strike=sel.strike,
+            underlying_spot=spot, strike=sel.strike, lot_size=sel.lot_size,
         )
         if pos is not None:
             self.trades_today[pid] = self.trades_today.get(pid, 0) + 1
@@ -404,6 +406,26 @@ class Engine:
         else:
             self._sync_ok = True
         return self._sync_ok
+
+    def check_partial_targets(self) -> None:
+        """Book a partial profit (config.partial_exit_fraction) on any open option
+        position whose premium has gained partial_target_pct. Fires once per
+        position; needs >= 2 lots to split."""
+        pct = self.cfg.partial_target_pct
+        if pct <= 0:
+            return
+        _, detail = self.broker.mark_to_market()
+        for pos in list(self.broker.open_positions()):
+            if pos.partial_taken or not pos.lot_size or pos.entry_price <= 0:
+                continue
+            ltp = (detail.get(pos.pipeline_id) or {}).get("ltp")
+            if ltp is None:
+                continue
+            gain_pct = (ltp - pos.entry_price) / pos.entry_price * 100.0
+            if gain_pct >= pct:
+                log.info("%s +%.1f%% premium — booking partial (%.0f%%)",
+                         pos.pipeline_id, gain_pct, self.cfg.partial_exit_fraction * 100)
+                self.broker.partial_exit(pos.pipeline_id, self.cfg.partial_exit_fraction, price_hint=ltp)
 
     def check_profit_target(self) -> bool:
         """If total profit (realized + unrealized) has reached the daily target,

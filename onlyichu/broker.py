@@ -41,6 +41,8 @@ class Position:
     direction: str  # "LONG" | "SHORT" (underlying view; the option is always bought)
     entry_spot: float | None = None  # underlying index level at entry
     strike: float | None = None  # option strike price
+    lot_size: int | None = None  # exchange lot size (for whole-lot partial exits)
+    partial_taken: bool = False  # a partial profit exit has already fired
 
     def pnl(self, exit_price: float) -> float:
         return (exit_price - self.entry_price) * self.qty
@@ -86,6 +88,7 @@ class BaseBroker:
         price_hint: float | None,
         underlying_spot: float | None = None,
         strike: float | None = None,
+        lot_size: int | None = None,
     ) -> Position | None:
         if pipeline_id in self.state.positions:
             log.warning("%s already holds a position; entry skipped", pipeline_id)
@@ -103,6 +106,7 @@ class BaseBroker:
             direction=direction,
             entry_spot=underlying_spot,
             strike=strike,
+            lot_size=lot_size,
         )
         self.state.positions[pipeline_id] = pos
         self._log_trade("ENTRY", pos, fill, 0.0, index_price=underlying_spot)
@@ -147,6 +151,37 @@ class BaseBroker:
             f"{underlying_spot:.2f}" if underlying_spot is not None else "n/a",
             f"{pos.entry_spot:.2f}" if pos.entry_spot is not None else "n/a",
         )
+        return pnl
+
+    def partial_exit(self, pipeline_id: str, fraction: float, price_hint: float | None = None) -> float | None:
+        """Close a whole-lot portion (~`fraction`) of a position once, keeping the
+        rest. No-op if it can't be split into lots (single lot) or already done."""
+        pos = self.state.positions.get(pipeline_id)
+        if pos is None or pos.partial_taken or not pos.lot_size or fraction <= 0 or fraction >= 1:
+            return None
+        lots = pos.qty // pos.lot_size
+        if lots < 2:  # can't sell a fraction of a single lot
+            return None
+        sell_lots = max(1, min(lots - 1, int(round(lots * fraction))))
+        sell_qty = sell_lots * pos.lot_size
+        tmp = Position(
+            pipeline_id=pipeline_id, instrument_key=pos.instrument_key, symbol=pos.symbol,
+            qty=sell_qty, entry_price=pos.entry_price,
+            entry_time=datetime.now().isoformat(timespec="seconds"), direction=pos.direction,
+            strike=pos.strike, lot_size=pos.lot_size,
+        )
+        fill = self._fill_sell(tmp, price_hint)
+        if fill is None:
+            return None
+        pnl = 0.0 if (pos.entry_price is None or pos.entry_price <= 0) else (fill - pos.entry_price) * sell_qty
+        self._roll_pnl_date()
+        self.state.realized_pnl_today += pnl
+        pos.qty -= sell_qty
+        pos.partial_taken = True
+        self._log_trade("PARTIAL EXIT", tmp, fill, pnl)
+        self._persist()
+        log.info("%s partial exit %s x%d @ %.2f pnl=%+.2f (%d lot(s) left)",
+                 pipeline_id, pos.symbol, sell_qty, fill, pnl, pos.qty // pos.lot_size)
         return pnl
 
     def realized_pnl_today(self) -> float:

@@ -26,10 +26,37 @@ session:
 strategy:
   # Both pipelines run independently per index, exactly per the strategy spec.
   timeframes_minutes: [1, 5]
-  tenkan: 9
-  kijun: 26
-  senkou_b: 52
-  displacement: 26
+  # Ichimoku periods. Profiles from the optimization note:
+  #   Standard (daily):        9  / 26 / 52  / 26
+  #   Fast intraday (5m scalp): 7 / 22 / 44  / 22
+  #   Smooth trend (1m/5m):    12 / 24 / 120 / 24   <- recommended for noise filtering
+  tenkan: 12
+  kijun: 24
+  senkou_b: 120
+  displacement: 24
+
+  # --- Entry filters (optimization: reduce false breakouts) ---
+  # Chikou span must be clear of price `chikou_period` candles ago.
+  use_chikou_filter: true
+  chikou_period: 26
+  # MACD(fast,slow,signal) histogram must confirm direction (>0 long, <0 short).
+  use_macd_filter: true
+  macd_fast: 12
+  macd_slow: 26
+  macd_signal: 9
+  # Refuse entries when the cloud is thinner than this many index points
+  # (low-volatility consolidation). 0 disables. Tune per index's point scale.
+  min_cloud_thickness: 5
+
+  # --- Exit restructuring (optimization: fewer whipsaw exits) ---
+  # 'kijun'     = soft trailing stop on a Kijun close + hard stop at the opposite
+  #               Kumo edge (Span B for longs / Span A for shorts).
+  # 'any_level' = original: exit on a close past ANY of the four lines.
+  exit_mode: kijun
+  # Book this fraction of the position once the OPTION premium gains this %.
+  # Needs >= 2 lots to split (a single lot can't be halved). 0 disables.
+  partial_target_pct: 15
+  partial_exit_fraction: 0.5
 
 options:
   # ITM option selection: pick the strike whose delta is closest to target_delta

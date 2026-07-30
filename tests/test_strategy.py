@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 
 from onlyichu.candles import Candle
 from onlyichu.ichimoku import IchimokuParams, IchimokuState
-from onlyichu.strategy import ENTER_LONG, ENTER_SHORT, EXIT, Pipeline, decide
+from onlyichu.strategy import ENTER_LONG, ENTER_SHORT, EXIT, Pipeline, StrategyConfig, decide
 
 IST = timezone(timedelta(hours=5, minutes=30))
 
@@ -44,7 +44,7 @@ def _trending_candles(n: int, start_price: float, step: float) -> list[Candle]:
 
 def test_pipeline_emits_long_in_uptrend():
     params = IchimokuParams(tenkan=2, kijun=3, senkou_b=4, displacement=2)
-    p = Pipeline("TEST", 1, params)
+    p = Pipeline("TEST", 1, StrategyConfig(ich=params))
     candles = _trending_candles(10, 100.0, 1.0)
     p.warmup(candles[:-1])
     signals = p.on_candle_close(candles[-1], position_side=None)
