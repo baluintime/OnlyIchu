@@ -116,6 +116,11 @@ class DashboardService:
         from .strategy import build_strategy_config
         self.sc = build_strategy_config(cfg)
         self.params = self.sc.ich
+        # per-index StrategyConfig so the min_cloud_thickness gate matches each
+        # index's point scale (the dashboard mirrors the engine's per-index sc)
+        self._sc_by_key = {
+            ix.key: build_strategy_config(cfg, ix) for ix in cfg.instruments
+        }
         self.ttl = max(3.0, cfg.web_refresh_seconds / 2.0)
         self._lock = threading.Lock()
         self._cached: dict | None = None
@@ -258,7 +263,8 @@ class DashboardService:
                 else:
                     agg = TimeframeAggregator(tf)
                     series = [done for c in one_min if (done := agg.feed(c))]
-                analysis = analyze_series(series, self.sc) or {"ready": False, "candles": 0}
+                sc = self._sc_by_key.get(index.key, self.sc)
+                analysis = analyze_series(series, sc) or {"ready": False, "candles": 0}
                 analysis["timeframe"] = f"{tf}m"
                 entry["pipelines"].append(analysis)
             indices_payload.append(entry)

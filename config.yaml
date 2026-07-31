@@ -45,7 +45,9 @@ strategy:
   macd_slow: 26
   macd_signal: 9
   # Refuse entries when the cloud is thinner than this many index points
-  # (low-volatility consolidation). 0 disables. Tune per index's point scale.
+  # (low-volatility consolidation). 0 disables. This is the GLOBAL default; each
+  # index moves on a different point scale, so override it per instrument below
+  # with `min_cloud_thickness:` (an index without an override inherits this).
   min_cloud_thickness: 5
 
   # --- Exit restructuring (optimization: fewer whipsaw exits) ---
@@ -115,24 +117,33 @@ live:
 #   python -m onlyichu instruments --search "smlcap"
 # options_available=false indices have no exchange-traded options; they are traded
 # synthetically at index level in paper mode and skipped in live mode.
+# min_cloud_thickness per index: the Kumo thickness gate is measured in that
+# index's own points, so each index needs its own floor (BANKNIFTY moves in the
+# hundreds while MIDCPNIFTY moves in the tens). Roughly scaled to ~0.05% of the
+# index level. Omit the field on an index to inherit strategy.min_cloud_thickness.
 instruments:
   - name: NIFTY
     key: "NSE_INDEX|Nifty 50"
     enabled: true
     options_available: true
+    min_cloud_thickness: 12
   - name: BANKNIFTY
     key: "NSE_INDEX|Nifty Bank"
     enabled: true
     options_available: true
+    min_cloud_thickness: 25
   - name: FINNIFTY
     key: "NSE_INDEX|Nifty Fin Service"
     enabled: true
     options_available: true
+    min_cloud_thickness: 12
   - name: MIDCPNIFTY
     key: "NSE_INDEX|NIFTY MID SELECT"
     enabled: true
     options_available: true
+    min_cloud_thickness: 6
   - name: NIFTYNXT50
     key: "NSE_INDEX|Nifty Next 50"
     enabled: true
     options_available: true
+    min_cloud_thickness: 30

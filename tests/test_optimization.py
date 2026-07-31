@@ -80,3 +80,59 @@ def test_decide_eval_entry_exit_reversal():
     assert decide_eval(_eval(long_should_exit=False), "LONG") == []
     # reversal: exit long and immediately enter short in one candle
     assert decide_eval(_eval(long_should_exit=True, short_ok=True), "LONG") == [EXIT, ENTER_SHORT]
+
+
+def test_build_strategy_config_per_index_thickness_override():
+    from onlyichu.config import Config, IndexConfig
+    from onlyichu.strategy import build_strategy_config
+
+    cfg = Config()
+    cfg.min_cloud_thickness = 5.0
+
+    # no per-index value -> inherit the global
+    inherit = IndexConfig(name="MIDCPNIFTY", key="k")
+    assert build_strategy_config(cfg, inherit).min_cloud_thickness == 5.0
+
+    # per-index value wins
+    override = IndexConfig(name="BANKNIFTY", key="k2", min_cloud_thickness=25.0)
+    assert build_strategy_config(cfg, override).min_cloud_thickness == 25.0
+
+    # a per-index 0 is a real override (disables the gate for that index)
+    off = IndexConfig(name="NIFTY", key="k3", min_cloud_thickness=0.0)
+    assert build_strategy_config(cfg, off).min_cloud_thickness == 0.0
+
+    # no index at all -> global
+    assert build_strategy_config(cfg).min_cloud_thickness == 5.0
+
+
+def test_config_yaml_parses_per_index_thickness(tmp_path):
+    from onlyichu.config import load_config
+
+    yml = tmp_path / "c.yaml"
+    yml.write_text(
+        "strategy:\n"
+        "  min_cloud_thickness: 5\n"
+        "instruments:\n"
+        "  - name: BANKNIFTY\n"
+        "    key: 'NSE_INDEX|Nifty Bank'\n"
+        "    min_cloud_thickness: 25\n"
+        "  - name: MIDCPNIFTY\n"
+        "    key: 'NSE_INDEX|NIFTY MID SELECT'\n"
+    )
+    cfg = load_config(str(yml))
+    by_name = {i.name: i for i in cfg.instruments}
+    assert by_name["BANKNIFTY"].min_cloud_thickness == 25.0
+    assert by_name["MIDCPNIFTY"].min_cloud_thickness is None  # inherits global
+
+
+def test_per_index_thickness_changes_signal():
+    # same series, two indices: a thick-gate index blocks the entry the
+    # loose-gate index takes
+    highs, lows, closes = rising(40)
+    ev0 = evaluate(highs, lows, closes, StrategyConfig(ich=P))
+    thick = ev0.thickness
+
+    loose = StrategyConfig(ich=P, min_cloud_thickness=thick / 2)
+    strict = StrategyConfig(ich=P, min_cloud_thickness=thick * 2)
+    assert evaluate(highs, lows, closes, loose).signal == "LONG"
+    assert evaluate(highs, lows, closes, strict).signal == "NEUTRAL"

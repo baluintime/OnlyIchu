@@ -59,8 +59,17 @@ class StrategyConfig:
         return need
 
 
-def build_strategy_config(cfg) -> StrategyConfig:
-    """Build a StrategyConfig from the app Config (duck-typed)."""
+def build_strategy_config(cfg, index=None) -> StrategyConfig:
+    """Build a StrategyConfig from the app Config (duck-typed).
+
+    When `index` (an IndexConfig) is given and it carries its own
+    `min_cloud_thickness`, that per-index value overrides the global one — each
+    index moves on a different point scale, so the thickness gate is tuned per
+    index. All other fields stay global.
+    """
+    thickness = cfg.min_cloud_thickness
+    if index is not None and getattr(index, "min_cloud_thickness", None) is not None:
+        thickness = index.min_cloud_thickness
     return StrategyConfig(
         ich=IchimokuParams(cfg.tenkan, cfg.kijun, cfg.senkou_b, cfg.displacement),
         use_chikou=cfg.use_chikou_filter,
@@ -69,7 +78,7 @@ def build_strategy_config(cfg) -> StrategyConfig:
         macd_fast=cfg.macd_fast,
         macd_slow=cfg.macd_slow,
         macd_signal=cfg.macd_signal,
-        min_cloud_thickness=cfg.min_cloud_thickness,
+        min_cloud_thickness=thickness,
         exit_mode=cfg.exit_mode,
     )
 

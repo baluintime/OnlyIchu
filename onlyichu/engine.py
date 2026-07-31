@@ -89,7 +89,10 @@ class Engine:
         self.broker: BaseBroker = (
             LiveBroker(cfg, api) if cfg.mode == "live" else PaperBroker(cfg, api)
         )
-        self.runners = [IndexRunner(ix, cfg, self.sc) for ix in cfg.enabled_instruments]
+        self.runners = [
+            IndexRunner(ix, cfg, build_strategy_config(cfg, ix))
+            for ix in cfg.enabled_instruments
+        ]
         self.trades_today: dict[str, int] = {}
         self._squared_off = False
         self._halted = False

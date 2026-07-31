@@ -17,6 +17,11 @@ class IndexConfig:
     enabled: bool = True            # show on dashboard / compute signals
     options_available: bool = True  # index has exchange-listed option contracts
     trade_enabled: bool = True      # place trades on signals (toggle in the UI)
+    # Per-index minimum cloud thickness (index points). None = inherit the global
+    # strategy.min_cloud_thickness. Each index trades on a different point scale
+    # (BANKNIFTY moves in the hundreds, FINNIFTY in the tens), so a single global
+    # value can't gate them all — override the ones that need it.
+    min_cloud_thickness: float | None = None
 
 
 @dataclass
@@ -185,6 +190,11 @@ def load_config(path: str = "config.yaml") -> Config:
             enabled=bool(item.get("enabled", True)),
             options_available=bool(item.get("options_available", True)),
             trade_enabled=bool(item.get("trade_enabled", True)),
+            min_cloud_thickness=(
+                float(item["min_cloud_thickness"])
+                if item.get("min_cloud_thickness") is not None
+                else None
+            ),
         )
         for item in (raw.get("instruments") or [])
     ]

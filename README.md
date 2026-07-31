@@ -19,7 +19,11 @@ Implements the multi-timeframe execution protocol from
 - **SHORT**: close strictly below all levels → buy an **ITM Put** at the next open.
 - **Entry filters** (optional, on by default; reduce false breakouts in chop):
   **Chikou span** clear of price N candles ago, **MACD(12,26,9) histogram**
-  confirming direction, and a **minimum cloud thickness** gate.
+  confirming direction, and a **minimum cloud thickness** gate. The thickness
+  gate is **per index** — each index moves on its own point scale (BANKNIFTY in
+  the hundreds, MIDCPNIFTY in the tens), so set `min_cloud_thickness:` on each
+  instrument in `config.yaml`; an index without one inherits the global
+  `strategy.min_cloud_thickness`.
 - **Tiered exit** (`exit_mode: kijun`): soft trailing stop on a **Kijun close**
   plus a hard stop at the **opposite Kumo edge** — instead of exiting on any single
   line, which whipsaws on fast timeframes. Set `exit_mode: any_level` for the
