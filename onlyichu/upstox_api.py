@@ -107,6 +107,35 @@ class UpstoxAPI:
     def ltp_single(self, instrument_key: str) -> float | None:
         return self.ltp([instrument_key]).get(instrument_key)
 
+    def full_quote(self, instrument_keys: list[str]) -> dict[str, dict]:
+        """Full market quote for one or more instruments: OHLC, last price,
+        five-level bid/ask depth, volume and (for F&O) open interest.
+
+        Returns ``{instrument_key: quote_dict}``. The momentum screener uses
+        ``depth`` (order-book imbalance) and ``oi`` (futures OI build-up)."""
+        body = self._request(
+            "GET",
+            "/v2/market-quote/quotes",
+            params={"instrument_key": ",".join(instrument_keys)},
+        )
+        out: dict[str, dict] = {}
+        for item in (body.get("data") or {}).values():
+            key = item.get("instrument_token") or item.get("instrument_key")
+            if key is not None:
+                out[key] = item
+        return out
+
+    @staticmethod
+    def depth_totals(quote: dict) -> tuple[float | None, float | None]:
+        """Total buy vs sell quantity across the five order-book levels of a
+        ``full_quote`` entry. Returns (buy_qty, sell_qty), each None if absent."""
+        depth = (quote or {}).get("depth") or {}
+        buy = depth.get("buy") or []
+        sell = depth.get("sell") or []
+        buy_qty = sum(float(lvl.get("quantity", 0) or 0) for lvl in buy) if buy else None
+        sell_qty = sum(float(lvl.get("quantity", 0) or 0) for lvl in sell) if sell else None
+        return buy_qty, sell_qty
+
     # -------------------------------------------------------------- options
 
     def option_contracts(self, underlying_key: str) -> list[dict]:

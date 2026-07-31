@@ -22,7 +22,7 @@ from . import auth
 from . import settings as settings_mod
 
 from .candles import Candle, TimeframeAggregator
-from .config import Config, IndexConfig
+from .config import Config, IndexConfig, MomentumSymbol
 from .strategy import StrategyConfig, evaluate
 from .tzutil import get_zone
 from .upstox_api import UpstoxAPI, UpstoxError
@@ -347,6 +347,105 @@ def read_trade_log(path: str, limit: int = 200) -> list[dict]:
     return rows[-limit:][::-1]
 
 
+def _momentum_config_dict(cfg: Config) -> dict:
+    return {
+        "min_gap_pct": cfg.mom_min_gap_pct,
+        "min_rvol": cfg.mom_min_rvol,
+        "min_oi_change_pct": cfg.mom_min_oi_change_pct,
+        "min_depth_ratio": cfg.mom_min_depth_ratio,
+        "opening_window_minutes": cfg.mom_opening_window_minutes,
+        "require_confirmation": cfg.mom_require_confirmation,
+        "require_pdh_pdl": cfg.mom_require_pdh_pdl,
+        "require_cvd": cfg.mom_require_cvd,
+        "require_chikou": cfg.mom_require_chikou,
+        "require_tenkan_kijun": cfg.mom_require_tenkan_kijun,
+        "delta_min": cfg.mom_delta_min,
+        "delta_max": cfg.mom_delta_max,
+        "timeframes": [f"{tf}m" for tf in cfg.mom_timeframes_minutes],
+        "symbols": [
+            {"name": s.name, "key": s.key, "futures_key": s.futures_key, "enabled": s.enabled}
+            for s in cfg.momentum_symbols
+        ],
+    }
+
+
+_MOM_FLOAT_FIELDS = {
+    "min_gap_pct": "mom_min_gap_pct",
+    "min_rvol": "mom_min_rvol",
+    "min_oi_change_pct": "mom_min_oi_change_pct",
+    "min_depth_ratio": "mom_min_depth_ratio",
+    "delta_min": "mom_delta_min",
+    "delta_max": "mom_delta_max",
+}
+_MOM_BOOL_FIELDS = {
+    "require_confirmation": "mom_require_confirmation",
+    "require_pdh_pdl": "mom_require_pdh_pdl",
+    "require_cvd": "mom_require_cvd",
+    "require_chikou": "mom_require_chikou",
+    "require_tenkan_kijun": "mom_require_tenkan_kijun",
+}
+
+
+def _apply_momentum_config(cfg: Config, momentum, body: dict) -> tuple[bool, str]:
+    changed = []
+    for field, attr in _MOM_FLOAT_FIELDS.items():
+        if field in body and body[field] is not None:
+            try:
+                val = float(body[field])
+            except (TypeError, ValueError):
+                return False, f"{field} must be a number"
+            if val < 0:
+                return False, f"{field} cannot be negative"
+            setattr(cfg, attr, val)
+            changed.append(field)
+    if "opening_window_minutes" in body and body["opening_window_minutes"] is not None:
+        try:
+            val = int(body["opening_window_minutes"])
+        except (TypeError, ValueError):
+            return False, "opening_window_minutes must be an integer"
+        if val < 1:
+            return False, "opening_window_minutes must be >= 1"
+        cfg.mom_opening_window_minutes = val
+        changed.append("opening_window_minutes")
+    for field, attr in _MOM_BOOL_FIELDS.items():
+        if field in body:
+            setattr(cfg, attr, bool(body[field]))
+            changed.append(field)
+    if cfg.mom_delta_min > cfg.mom_delta_max:
+        return False, "delta_min cannot exceed delta_max"
+    # rebuild the service's cached MomentumConfig and drop stale results
+    momentum.mcfg = cfg.momentum_config()
+    momentum.invalidate()
+    return True, f"updated: {', '.join(changed)}" if changed else "nothing to change"
+
+
+def _mutate_momentum_symbols(cfg: Config, momentum, body: dict) -> tuple[bool, str]:
+    action = str(body.get("action", "")).lower()
+    name = str(body.get("name", "")).strip()
+    if action == "add":
+        key = str(body.get("key", "")).strip()
+        if not (name and key):
+            return False, "name and Upstox instrument key are required"
+        if any(s.name.lower() == name.lower() for s in cfg.momentum_symbols):
+            return False, f"{name} is already on the watchlist"
+        futures = str(body.get("futures_key", "")).strip() or None
+        cfg.momentum_symbols.append(MomentumSymbol(name=name, key=key, futures_key=futures))
+        momentum.invalidate()
+        return True, f"added {name}"
+    sym = next((s for s in cfg.momentum_symbols if s.name.lower() == name.lower()), None)
+    if sym is None:
+        return False, f"unknown symbol {name!r}"
+    if action == "remove":
+        cfg.momentum_symbols.remove(sym)
+        momentum.invalidate()
+        return True, f"removed {name}"
+    if action == "toggle":
+        sym.enabled = bool(body.get("enabled", not sym.enabled))
+        momentum.invalidate()
+        return True, f"{name}: {'ON' if sym.enabled else 'OFF'}"
+    return False, f"unknown action {action!r}"
+
+
 class TradingController:
     """Starts/stops the trading Engine in a background thread, switchable
     between paper and live mode from the dashboard."""
@@ -570,9 +669,41 @@ def create_app(cfg: Config, api: UpstoxAPI, token: str | None = None) -> Flask:
     controller = TradingController(cfg, api, token)
     auth_mgr = AuthManager(api, controller)
 
+    from .momentum_web import MomentumService
+    momentum = MomentumService(cfg, api)
+
     @app.get("/")
     def dashboard():  # type: ignore[unused-variable]
         return render_template("dashboard.html", refresh_seconds=cfg.web_refresh_seconds)
+
+    @app.get("/momentum")
+    def momentum_page():  # type: ignore[unused-variable]
+        return render_template("momentum.html", refresh_seconds=cfg.web_refresh_seconds)
+
+    @app.get("/api/momentum")
+    def api_momentum():  # type: ignore[unused-variable]
+        payload = dict(momentum.payload())
+        payload["auth"] = auth_mgr.status()
+        return jsonify(payload)
+
+    @app.get("/api/momentum/config")
+    def api_momentum_config_get():  # type: ignore[unused-variable]
+        return jsonify(_momentum_config_dict(cfg))
+
+    @app.post("/api/momentum/config")
+    def api_momentum_config_set():  # type: ignore[unused-variable]
+        body = request.get_json(silent=True) or {}
+        ok, msg = _apply_momentum_config(cfg, momentum, body)
+        return jsonify({"ok": ok, "message": msg}), (200 if ok else 400)
+
+    @app.post("/api/momentum/symbols")
+    def api_momentum_symbols():  # type: ignore[unused-variable]
+        body = request.get_json(silent=True) or {}
+        ok, msg = _mutate_momentum_symbols(cfg, momentum, body)
+        return jsonify({"ok": ok, "message": msg, "symbols": [
+            {"name": s.name, "key": s.key, "futures_key": s.futures_key, "enabled": s.enabled}
+            for s in cfg.momentum_symbols
+        ]}), (200 if ok else 400)
 
     @app.get("/api/dashboard")
     def api_dashboard():  # type: ignore[unused-variable]

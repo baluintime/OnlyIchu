@@ -25,6 +25,20 @@ class IndexConfig:
 
 
 @dataclass
+class MomentumSymbol:
+    """A watchlist stock for the NSE Intraday Momentum strategy.
+
+    ``key`` is the Upstox equity instrument key (e.g. ``NSE_EQ|INE002A01018``);
+    ``futures_key`` is the optional near-month futures key used for the ΔOI
+    build-up gate. Without it the OI check is reported as unavailable."""
+
+    name: str
+    key: str
+    futures_key: str | None = None
+    enabled: bool = True
+
+
+@dataclass
 class Config:
     mode: str = "paper"
 
@@ -96,9 +110,65 @@ class Config:
 
     instruments: list[IndexConfig] = field(default_factory=list)
 
+    # --- NSE Intraday Momentum Option Strategy (BRD REQ-NSE-OPT-2026-V1) ---
+    # Runs on both 1m and 5m; screens a stock watchlist for gap/RVOL/OI/depth,
+    # applies the directional matrix, false-breakout filters and Ichimoku Kumo
+    # trend retention. Operated from the /momentum web page.
+    mom_min_gap_pct: float = 1.5
+    mom_min_rvol: float = 3.0
+    mom_min_oi_change_pct: float = 3.0
+    mom_min_depth_ratio: float = 2.5
+    mom_opening_window_minutes: int = 5
+    mom_require_confirmation: bool = True
+    mom_require_pdh_pdl: bool = True
+    mom_require_cvd: bool = True
+    mom_tenkan: int = 9
+    mom_kijun: int = 26
+    mom_senkou_b: int = 52
+    mom_displacement: int = 26
+    mom_chikou_period: int = 26
+    mom_require_chikou: bool = True
+    mom_require_tenkan_kijun: bool = True
+    mom_delta_min: float = 0.50
+    mom_delta_max: float = 0.65
+    mom_target_delta: float = 0.58
+    mom_max_risk_pct: float = 1.0
+    mom_timeframes_minutes: list[int] = field(default_factory=lambda: [1, 5])
+    momentum_symbols: list[MomentumSymbol] = field(default_factory=list)
+
     @property
     def enabled_instruments(self) -> list[IndexConfig]:
         return [i for i in self.instruments if i.enabled]
+
+    @property
+    def enabled_momentum_symbols(self) -> list[MomentumSymbol]:
+        return [s for s in self.momentum_symbols if s.enabled]
+
+    def momentum_config(self):
+        """Build a :class:`onlyichu.momentum.MomentumConfig` from these fields."""
+        from .momentum import MomentumConfig
+
+        return MomentumConfig(
+            min_gap_pct=self.mom_min_gap_pct,
+            min_rvol=self.mom_min_rvol,
+            min_oi_change_pct=self.mom_min_oi_change_pct,
+            min_depth_ratio=self.mom_min_depth_ratio,
+            opening_window_minutes=self.mom_opening_window_minutes,
+            require_confirmation=self.mom_require_confirmation,
+            require_pdh_pdl=self.mom_require_pdh_pdl,
+            require_cvd=self.mom_require_cvd,
+            tenkan=self.mom_tenkan,
+            kijun=self.mom_kijun,
+            senkou_b=self.mom_senkou_b,
+            displacement=self.mom_displacement,
+            chikou_period=self.mom_chikou_period,
+            require_chikou=self.mom_require_chikou,
+            require_tenkan_kijun=self.mom_require_tenkan_kijun,
+            delta_min=self.mom_delta_min,
+            delta_max=self.mom_delta_max,
+            target_delta=self.mom_target_delta,
+            max_risk_pct=self.mom_max_risk_pct,
+        )
 
 
 def _parse_time(value: Any, default: time) -> time:
@@ -197,5 +267,43 @@ def load_config(path: str = "config.yaml") -> Config:
             ),
         )
         for item in (raw.get("instruments") or [])
+    ]
+
+    mom = raw.get("momentum", {}) or {}
+    scr = mom.get("screening", {}) or {}
+    cfg.mom_min_gap_pct = float(scr.get("min_gap_pct", cfg.mom_min_gap_pct))
+    cfg.mom_min_rvol = float(scr.get("min_rvol", cfg.mom_min_rvol))
+    cfg.mom_min_oi_change_pct = float(scr.get("min_oi_change_pct", cfg.mom_min_oi_change_pct))
+    cfg.mom_min_depth_ratio = float(scr.get("min_depth_ratio", cfg.mom_min_depth_ratio))
+    cfg.mom_opening_window_minutes = int(
+        scr.get("opening_window_minutes", cfg.mom_opening_window_minutes)
+    )
+    filt = mom.get("filters", {}) or {}
+    cfg.mom_require_confirmation = bool(filt.get("require_confirmation", cfg.mom_require_confirmation))
+    cfg.mom_require_pdh_pdl = bool(filt.get("require_pdh_pdl", cfg.mom_require_pdh_pdl))
+    cfg.mom_require_cvd = bool(filt.get("require_cvd", cfg.mom_require_cvd))
+    ich = mom.get("ichimoku", {}) or {}
+    cfg.mom_tenkan = int(ich.get("tenkan", cfg.mom_tenkan))
+    cfg.mom_kijun = int(ich.get("kijun", cfg.mom_kijun))
+    cfg.mom_senkou_b = int(ich.get("senkou_b", cfg.mom_senkou_b))
+    cfg.mom_displacement = int(ich.get("displacement", cfg.mom_displacement))
+    cfg.mom_chikou_period = int(ich.get("chikou_period", cfg.mom_chikou_period))
+    cfg.mom_require_chikou = bool(ich.get("require_chikou", cfg.mom_require_chikou))
+    cfg.mom_require_tenkan_kijun = bool(ich.get("require_tenkan_kijun", cfg.mom_require_tenkan_kijun))
+    mopt = mom.get("options", {}) or {}
+    cfg.mom_delta_min = float(mopt.get("delta_min", cfg.mom_delta_min))
+    cfg.mom_delta_max = float(mopt.get("delta_max", cfg.mom_delta_max))
+    cfg.mom_target_delta = float(mopt.get("target_delta", cfg.mom_target_delta))
+    cfg.mom_max_risk_pct = float(mopt.get("max_risk_pct", cfg.mom_max_risk_pct))
+    if mom.get("timeframes_minutes"):
+        cfg.mom_timeframes_minutes = list(mom.get("timeframes_minutes"))
+    cfg.momentum_symbols = [
+        MomentumSymbol(
+            name=item["name"],
+            key=item["key"],
+            futures_key=item.get("futures_key"),
+            enabled=bool(item.get("enabled", True)),
+        )
+        for item in (mom.get("symbols") or [])
     ]
     return cfg

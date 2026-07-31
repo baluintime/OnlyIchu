@@ -14,6 +14,7 @@ class Candle:
     low: float
     close: float
     volume: float = 0.0
+    oi: float = 0.0  # open interest at the candle close (F&O instruments only)
 
     @staticmethod
     def from_upstox(row: list) -> "Candle":
@@ -25,6 +26,7 @@ class Candle:
             low=float(row[3]),
             close=float(row[4]),
             volume=float(row[5]) if len(row) > 5 and row[5] is not None else 0.0,
+            oi=float(row[6]) if len(row) > 6 and row[6] is not None else 0.0,
         )
 
 

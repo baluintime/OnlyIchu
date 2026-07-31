@@ -1,0 +1,424 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OnlyIchu — NSE Intraday Momentum</title>
+<style>
+  :root {
+    --bg0: #060913; --bg1: #0b1226; --bg2: #101a35;
+    --card: rgba(255,255,255,.045); --card-border: rgba(255,255,255,.09);
+    --text: #e8edf7; --muted: #8b96ad; --faint: #5b6479;
+    --green: #22c55e; --green-soft: rgba(34,197,94,.14);
+    --red: #f4405f; --red-soft: rgba(244,64,95,.14);
+    --amber: #f5b93c; --amber-soft: rgba(245,185,60,.12);
+    --cyan: #38bdf8; --violet: #8b7cf6;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    font: 15px/1.45 "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
+    color: var(--text); background: var(--bg0); overflow-x: hidden;
+  }
+  body::before, body::after {
+    content: ""; position: fixed; inset: -40%; z-index: -1; pointer-events: none;
+    background:
+      radial-gradient(38% 30% at 22% 28%, rgba(56,189,248,.13), transparent 60%),
+      radial-gradient(30% 34% at 78% 20%, rgba(139,124,246,.14), transparent 60%),
+      radial-gradient(34% 30% at 60% 80%, rgba(34,197,94,.08), transparent 60%);
+    animation: aurora 26s ease-in-out infinite alternate;
+  }
+  body::after { animation-duration: 34s; animation-direction: alternate-reverse; opacity: .7; }
+  @keyframes aurora {
+    0%   { transform: translate(0,0) rotate(0deg) scale(1); }
+    50%  { transform: translate(4%, -3%) rotate(4deg) scale(1.06); }
+    100% { transform: translate(-4%, 3%) rotate(-3deg) scale(1.02); }
+  }
+  .wrap { max-width: 1500px; margin: 0 auto; padding: 22px 26px 60px; }
+
+  header {
+    display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
+    padding: 14px 20px; border-radius: 18px;
+    background: linear-gradient(120deg, rgba(255,255,255,.06), rgba(255,255,255,.02));
+    border: 1px solid var(--card-border); backdrop-filter: blur(14px);
+    animation: fadeDown .6s ease both;
+  }
+  @keyframes fadeDown { from { opacity:0; transform: translateY(-14px);} to { opacity:1; transform:none; } }
+  .brand { display: flex; align-items: center; gap: 12px; margin-right: auto; }
+  .brand .logo {
+    width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center;
+    font-weight: 800; font-size: 17px; color: #fff;
+    background: conic-gradient(from 200deg, var(--cyan), var(--violet), var(--green), var(--cyan));
+    animation: spinHue 14s linear infinite;
+  }
+  @keyframes spinHue { to { filter: hue-rotate(360deg); } }
+  .brand h1 { font-size: 19px; letter-spacing: .3px; }
+  .brand small { display:block; color: var(--muted); font-weight: 400; font-size: 12px; }
+
+  nav a { color: var(--muted); text-decoration: none; font-size: 13px; font-weight: 600;
+          padding: 7px 14px; border-radius: 999px; border: 1px solid var(--card-border);
+          background: rgba(255,255,255,.04); transition: all .2s; }
+  nav a:hover { color: var(--text); }
+  nav a.active { color: var(--cyan); border-color: rgba(56,189,248,.35); background: rgba(56,189,248,.1); }
+
+  .pill { display: inline-flex; align-items: center; gap: 8px; padding: 7px 14px;
+    border-radius: 999px; font-size: 13px; font-weight: 600; letter-spacing: .5px;
+    border: 1px solid var(--card-border); background: rgba(255,255,255,.04); color: var(--muted); }
+  .pill .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--faint); }
+  .pill.open { color: var(--green); border-color: rgba(34,197,94,.35); background: var(--green-soft); }
+  .pill.open .dot { background: var(--green); animation: ping 1.6s ease-out infinite; }
+  .pill.closed { color: var(--red); border-color: rgba(244,64,95,.3); background: var(--red-soft); }
+  .pill.closed .dot { background: var(--red); }
+  .pill.preopen { color: var(--amber); border-color: rgba(245,185,60,.3); background: var(--amber-soft); }
+  .pill.preopen .dot { background: var(--amber); animation: ping 2.4s ease-out infinite; }
+  @keyframes ping { 0% { box-shadow: 0 0 0 0 rgba(34,197,94,.55);} 100% { box-shadow: 0 0 0 9px rgba(34,197,94,0);} }
+  .clock { font-variant-numeric: tabular-nums; font-size: 15px; color: var(--text); text-align:right; }
+  .clock small { color: var(--muted); display: block; font-size: 11px; }
+
+  .toolbar { margin-top: 14px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  .btn { border: 1px solid var(--card-border); cursor: pointer; padding: 8px 16px; border-radius: 12px;
+    font: 700 12.5px/1 inherit; letter-spacing: .6px; color: var(--text); background: rgba(255,255,255,.06);
+    transition: transform .15s, box-shadow .3s, background .3s; }
+  .btn:hover { transform: translateY(-1px); }
+  .btn.cyan { background: rgba(56,189,248,.12); border-color: rgba(56,189,248,.35); color: var(--cyan); }
+  .legend { margin-left: auto; display: flex; gap: 14px; font-size: 11.5px; color: var(--muted); flex-wrap: wrap; }
+  .legend b { font-weight: 700; }
+  .legend .g { color: var(--green); } .legend .r { color: var(--red); } .legend .n { color: var(--amber); }
+
+  .banner { margin-top: 14px; padding: 14px 18px; border-radius: 14px; font-size: 13.5px;
+    border: 1px solid rgba(245,185,60,.3); background: var(--amber-soft); color: var(--amber); display:none; }
+  .banner.show { display:block; }
+  .banner a { color: var(--cyan); }
+
+  .grid { margin-top: 18px; display: grid; gap: 16px;
+    grid-template-columns: repeat(auto-fill, minmax(430px, 1fr)); }
+  .sym {
+    border-radius: 18px; padding: 16px 18px; border: 1px solid var(--card-border);
+    background: linear-gradient(160deg, rgba(255,255,255,.05), rgba(255,255,255,.015));
+    backdrop-filter: blur(10px); animation: rise .5s ease both;
+  }
+  @keyframes rise { from { opacity: 0; transform: translateY(10px);} to { opacity:1; transform:none; } }
+  .sym.hot { border-color: rgba(34,197,94,.45); box-shadow: 0 0 22px rgba(34,197,94,.12); }
+  .sym-head { display:flex; align-items:baseline; gap:10px; margin-bottom: 12px; }
+  .sym-head h2 { font-size: 18px; letter-spacing:.3px; }
+  .sym-head .ltp { margin-left:auto; font-variant-numeric: tabular-nums; font-weight:700; }
+  .chg.up { color: var(--green); } .chg.down { color: var(--red); }
+  .chip { font-size: 10.5px; padding: 2px 8px; border-radius: 999px; border:1px solid var(--card-border);
+    color: var(--muted); background: rgba(255,255,255,.04); letter-spacing:.4px; }
+
+  .pipes { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  @media (max-width: 560px) { .pipes { grid-template-columns: 1fr; } }
+  .pipe { border-radius: 14px; padding: 12px; border: 1px solid var(--card-border); background: rgba(0,0,0,.22); }
+  .pipe-top { display:flex; align-items:center; gap:8px; margin-bottom: 8px; }
+  .tf { font-size: 11px; font-weight: 800; letter-spacing:1px; color: var(--muted);
+        padding: 3px 9px; border-radius: 999px; background: rgba(255,255,255,.05); border:1px solid var(--card-border); }
+  .action { margin-left:auto; font-size: 11.5px; font-weight: 800; letter-spacing: .8px;
+    padding: 4px 10px; border-radius: 999px; }
+  .action.ce { color: var(--green); background: var(--green-soft); border:1px solid rgba(34,197,94,.4); }
+  .action.pe { color: var(--red); background: var(--red-soft); border:1px solid rgba(244,64,95,.4); }
+  .action.avoid { color: var(--muted); background: rgba(255,255,255,.05); border:1px solid var(--card-border); }
+  .action.ready { animation: glow 1.6s ease-in-out infinite; }
+  @keyframes glow { 0%,100%{ box-shadow:0 0 0 0 rgba(34,197,94,.0);} 50%{ box-shadow:0 0 14px 0 rgba(34,197,94,.5);} }
+
+  .classline { font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+  .conv { height: 6px; border-radius: 999px; background: rgba(255,255,255,.08); overflow: hidden; margin-bottom: 10px; }
+  .conv > i { display:block; height:100%; border-radius:999px;
+    background: linear-gradient(90deg, var(--cyan), var(--green)); transition: width .4s; }
+
+  ul.checks { list-style:none; display:flex; flex-direction:column; gap: 5px; }
+  ul.checks li { display:flex; gap:8px; align-items:flex-start; font-size: 12px; }
+  .mark { flex: 0 0 16px; width:16px; height:16px; border-radius:50%; display:grid; place-items:center;
+    font-size: 10px; font-weight: 900; margin-top: 1px; }
+  .mark.pass { color: var(--green); background: var(--green-soft); }
+  .mark.fail { color: var(--red); background: var(--red-soft); }
+  .mark.na { color: var(--amber); background: var(--amber-soft); }
+  .ck-name { color: var(--text); font-weight:600; text-transform: capitalize; flex:0 0 auto; }
+  .ck-detail { color: var(--muted); }
+  .blocked { margin-top: 9px; font-size: 11.5px; color: var(--amber); }
+  .exitwarn { margin-top: 9px; font-size: 11.5px; color: var(--red); font-weight: 700; }
+  .kumo { margin-top: 8px; font-size: 11px; color: var(--faint); font-variant-numeric: tabular-nums; }
+
+  /* drawers */
+  .drawer { position: fixed; top:0; right:0; height:100%; width: 420px; max-width: 92vw; z-index: 40;
+    background: linear-gradient(160deg, var(--bg1), var(--bg0)); border-left: 1px solid var(--card-border);
+    box-shadow: -18px 0 50px rgba(0,0,0,.5); transform: translateX(100%); transition: transform .3s ease;
+    padding: 22px; overflow-y: auto; }
+  .drawer.open { transform: none; }
+  .drawer h3 { font-size: 16px; margin-bottom: 4px; }
+  .drawer p.sub { color: var(--muted); font-size: 12px; margin-bottom: 16px; }
+  .drawer label { display:block; font-size: 11.5px; color: var(--muted); margin: 12px 0 5px; letter-spacing:.4px; }
+  .drawer input[type=text], .drawer input[type=number] {
+    width:100%; padding: 9px 11px; border-radius: 10px; border:1px solid var(--card-border);
+    background: rgba(0,0,0,.3); color: var(--text); font: inherit; }
+  .row2 { display:grid; grid-template-columns: 1fr 1fr; gap:10px; }
+  .toggle { display:flex; align-items:center; justify-content:space-between; gap:10px;
+    padding: 9px 0; border-bottom: 1px solid rgba(255,255,255,.05); font-size: 13px; }
+  .switch { position: relative; width: 42px; height: 22px; flex:0 0 42px; }
+  .switch input { opacity:0; width:0; height:0; }
+  .slider { position:absolute; inset:0; border-radius:999px; background: rgba(255,255,255,.12); transition:.2s; cursor:pointer; }
+  .slider::before { content:""; position:absolute; height:16px; width:16px; left:3px; top:3px; border-radius:50%;
+    background: var(--muted); transition:.2s; }
+  .switch input:checked + .slider { background: rgba(34,197,94,.4); }
+  .switch input:checked + .slider::before { transform: translateX(20px); background: var(--green); }
+  .drawer .actions { margin-top: 18px; display:flex; gap:10px; }
+  .close-x { position:absolute; top:16px; right:18px; cursor:pointer; color: var(--muted); font-size: 20px; background:none; border:0; }
+  .backdrop { position: fixed; inset:0; background: rgba(0,0,0,.5); z-index:39; opacity:0; pointer-events:none; transition:opacity .3s; }
+  .backdrop.show { opacity:1; pointer-events:auto; }
+  .wl-item { display:flex; align-items:center; gap:8px; padding:8px 0; border-bottom:1px solid rgba(255,255,255,.05); font-size:13px; }
+  .wl-item .k { color: var(--faint); font-size: 10.5px; margin-left: 2px; }
+  .wl-item .rm { margin-left:auto; cursor:pointer; color: var(--red); background:none; border:0; font-size: 16px; }
+
+  .empty { margin-top: 40px; text-align:center; color: var(--muted); }
+  .connect { margin-top: 18px; padding: 20px; border-radius:16px; border:1px solid var(--card-border);
+    background: var(--card); display:none; }
+  .connect.show { display:block; }
+  .connect .row2 { margin-top: 10px; }
+  #toast { position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%) translateY(20px);
+    background: var(--bg2); border:1px solid var(--card-border); padding: 11px 18px; border-radius: 12px;
+    font-size: 13px; opacity:0; transition: all .3s; z-index: 60; max-width: 90vw; }
+  #toast.show { opacity:1; transform: translateX(-50%) translateY(0); }
+  #toast.ok { border-color: rgba(34,197,94,.4); } #toast.err { border-color: rgba(244,64,95,.4); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="brand">
+      <div class="logo">Iu</div>
+      <div>
+        <h1>NSE Intraday Momentum</h1>
+        <small>Gap · RVOL · OI Build-Up · Ichimoku Kumo — 1m &amp; 5m</small>
+      </div>
+    </div>
+    <nav style="display:flex; gap:8px;">
+      <a href="/">Ichimoku</a>
+      <a href="/momentum" class="active">Momentum</a>
+    </nav>
+    <span id="market" class="pill"><span class="dot"></span><span id="market-txt">—</span></span>
+    <div class="clock"><span id="clock">—</span><small id="date">—</small></div>
+  </header>
+
+  <div class="toolbar">
+    <button class="btn cyan" id="btn-config">⚙ Strategy Filters</button>
+    <button class="btn cyan" id="btn-watchlist">☰ Watchlist</button>
+    <span id="sub" class="chip">—</span>
+    <div class="legend">
+      <span><b class="g">●</b> pass</span>
+      <span><b class="r">●</b> fail</span>
+      <span><b class="n">●</b> n/a</span>
+      <span>BUY CALL = ITM CE · BUY PUT = ITM PE</span>
+    </div>
+  </div>
+
+  <div class="banner" id="banner"></div>
+
+  <div class="connect" id="connect">
+    <h3 style="font-size:15px; margin-bottom:4px;">Connect Upstox</h3>
+    <p style="color:var(--muted); font-size:12.5px;">Momentum data needs a live Upstox session. Connect on the
+      <a href="/" style="color:var(--cyan)">Ichimoku dashboard</a>, or paste a token below.</p>
+    <label style="display:block; font-size:11.5px; color:var(--muted); margin:12px 0 5px;">Access token</label>
+    <div style="display:flex; gap:10px;">
+      <input id="tok" type="text" placeholder="paste Upstox access token"
+        style="flex:1; padding:9px 11px; border-radius:10px; border:1px solid var(--card-border); background:rgba(0,0,0,.3); color:var(--text); font:inherit;">
+      <button class="btn cyan" id="tok-btn">Connect</button>
+    </div>
+  </div>
+
+  <div class="grid" id="grid"></div>
+  <div class="empty" id="empty" style="display:none;">No symbols on the watchlist yet — open <b>☰ Watchlist</b> to add NSE F&amp;O stocks.</div>
+</div>
+
+<!-- config drawer -->
+<div class="backdrop" id="backdrop"></div>
+<div class="drawer" id="drawer-config">
+  <button class="close-x" data-close>×</button>
+  <h3>Strategy Filters</h3>
+  <p class="sub">BRD thresholds. Changes apply to the next refresh.</p>
+  <div class="row2">
+    <div><label>Min |Gap %|</label><input type="number" step="0.1" id="cf-min_gap_pct"></div>
+    <div><label>Min RVOL</label><input type="number" step="0.1" id="cf-min_rvol"></div>
+    <div><label>Min ΔOI %</label><input type="number" step="0.5" id="cf-min_oi_change_pct"></div>
+    <div><label>Min depth ratio</label><input type="number" step="0.1" id="cf-min_depth_ratio"></div>
+    <div><label>Opening window (min)</label><input type="number" step="1" id="cf-opening_window_minutes"></div>
+    <div><label>Delta min</label><input type="number" step="0.05" id="cf-delta_min"></div>
+    <div><label>Delta max</label><input type="number" step="0.05" id="cf-delta_max"></div>
+  </div>
+  <div style="margin-top:14px;">
+    <div class="toggle">2-candle confirmation<label class="switch"><input type="checkbox" id="cf-require_confirmation"><span class="slider"></span></label></div>
+    <div class="toggle">PDH / PDL hold<label class="switch"><input type="checkbox" id="cf-require_pdh_pdl"><span class="slider"></span></label></div>
+    <div class="toggle">Cumulative Volume Delta<label class="switch"><input type="checkbox" id="cf-require_cvd"><span class="slider"></span></label></div>
+    <div class="toggle">Chikou span clear<label class="switch"><input type="checkbox" id="cf-require_chikou"><span class="slider"></span></label></div>
+    <div class="toggle">Tenkan / Kijun cross<label class="switch"><input type="checkbox" id="cf-require_tenkan_kijun"><span class="slider"></span></label></div>
+  </div>
+  <div class="actions"><button class="btn cyan" id="cf-save">Save filters</button></div>
+</div>
+
+<!-- watchlist drawer -->
+<div class="drawer" id="drawer-watchlist">
+  <button class="close-x" data-close>×</button>
+  <h3>Watchlist</h3>
+  <p class="sub">NSE F&amp;O stocks to screen. The futures key enables the ΔOI build-up gate.</p>
+  <div id="wl-list"></div>
+  <label>Name</label><input type="text" id="wl-name" placeholder="e.g. RELIANCE">
+  <label>Equity instrument key</label><input type="text" id="wl-key" placeholder="NSE_EQ|INE002A01018">
+  <label>Near-month futures key (optional)</label><input type="text" id="wl-fut" placeholder="NSE_FO|53001">
+  <div class="actions"><button class="btn cyan" id="wl-add">Add symbol</button></div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+const REFRESH = {{ refresh_seconds }} * 1000;
+let CFG = null;
+
+function toast(msg, ok) {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.className = 'show ' + (ok ? 'ok' : 'err');
+  setTimeout(() => { t.className = ''; }, 3200);
+}
+async function postJSON(url, body) {
+  const r = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+  return { ok: r.ok, data: await r.json() };
+}
+
+function marketPill(m) {
+  const el = document.getElementById('market'), txt = document.getElementById('market-txt');
+  const s = (m && m.status) || '—';
+  el.className = 'pill ' + (s === 'OPEN' ? 'open' : s === 'PRE-OPEN' ? 'preopen' : 'closed');
+  txt.textContent = s + (m && m.session ? ' · ' + m.session : '');
+}
+
+function markClass(st) { return st === 'pass' ? 'pass' : st === 'fail' ? 'fail' : 'na'; }
+function markSym(st) { return st === 'pass' ? '✓' : st === 'fail' ? '✕' : '–'; }
+
+function renderPipe(p) {
+  const actCls = p.action === 'BUY_CE' ? 'ce' : p.action === 'BUY_PE' ? 'pe' : 'avoid';
+  const ready = p.trade_ready ? ' ready' : '';
+  const checks = (p.checks || []).map(c =>
+    `<li><span class="mark ${markClass(c.status)}">${markSym(c.status)}</span>`
+    + `<span class="ck-name">${c.name.replace(/_/g,' ')}</span>`
+    + `<span class="ck-detail">${c.detail || ''}</span></li>`).join('');
+  const conv = Math.round((p.conviction || 0) * 100);
+  let footer = '';
+  if (p.exit_triggered) footer += `<div class="exitwarn">⚠ Kijun-sen exit — close any open position</div>`;
+  else if (p.blocked_reason && p.action !== 'AVOID') footer += `<div class="blocked">blocked: ${p.blocked_reason}</div>`;
+  let kumo = '';
+  if (p.kumo) kumo = `<div class="kumo">Kijun ${p.kumo.kijun ?? '—'} · cloud ${p.kumo.cloud_bottom ?? '—'}–${p.kumo.cloud_top ?? '—'} · price ${p.kumo.zone}</div>`;
+  return `<div class="pipe">
+    <div class="pipe-top"><span class="tf">${p.timeframe}</span>
+      <span class="action ${actCls}${ready}">${p.action_label}</span></div>
+    <div class="classline">${p.classification}${p.trade_ready ? ' · <b style="color:var(--green)">TRADE READY</b>' : ''}</div>
+    <div class="conv"><i style="width:${conv}%"></i></div>
+    <ul class="checks">${checks || '<li class="ck-detail">warming up…</li>'}</ul>
+    ${kumo}${footer}
+  </div>`;
+}
+
+function renderSymbol(s) {
+  const hot = (s.pipelines || []).some(p => p.trade_ready);
+  const chg = s.change_pct == null ? '' :
+    `<span class="chg ${s.change_pct >= 0 ? 'up' : 'down'}">${s.change_pct >= 0 ? '+' : ''}${s.change_pct}%</span>`;
+  let body;
+  if (s.error) body = `<div class="blocked" style="color:var(--red)">${s.error}</div>`;
+  else body = `<div class="pipes">${(s.pipelines || []).map(renderPipe).join('')}</div>`;
+  return `<div class="sym ${hot ? 'hot' : ''}">
+    <div class="sym-head"><h2>${s.name}</h2>
+      ${s.has_futures ? '' : '<span class="chip">no futures OI</span>'}
+      <span class="ltp">${s.ltp != null ? '₹' + s.ltp : '—'} ${chg}</span></div>
+    ${body}</div>`;
+}
+
+async function refresh() {
+  let d;
+  try { d = await (await fetch('/api/momentum')).json(); }
+  catch (e) { return; }
+  document.getElementById('clock').textContent = d.generated_at || '—';
+  document.getElementById('date').textContent = d.generated_date || '';
+  marketPill(d.market);
+  const th = (d.strategy && d.strategy.thresholds) || {};
+  document.getElementById('sub').textContent =
+    `gap≥${th.gap_pct}% · RVOL≥${th.rvol} · ΔOI≥${th.oi_change_pct}% · depth≥${th.depth_ratio}:1 · Δ${th.delta ? th.delta[0]+'–'+th.delta[1] : ''}`;
+
+  const connected = d.connected;
+  document.getElementById('connect').classList.toggle('show', !connected);
+  const banner = document.getElementById('banner');
+  if (d.error) { banner.textContent = d.error; banner.classList.add('show'); }
+  else banner.classList.remove('show');
+
+  const grid = document.getElementById('grid'), empty = document.getElementById('empty');
+  const syms = d.symbols || [];
+  if (!connected) { grid.innerHTML = ''; empty.style.display = 'none'; return; }
+  empty.style.display = syms.length ? 'none' : 'block';
+  grid.innerHTML = syms.map(renderSymbol).join('');
+}
+
+/* ---------- config drawer ---------- */
+async function loadConfig() {
+  CFG = await (await fetch('/api/momentum/config')).json();
+  for (const k of ['min_gap_pct','min_rvol','min_oi_change_pct','min_depth_ratio',
+      'opening_window_minutes','delta_min','delta_max']) {
+    const el = document.getElementById('cf-' + k); if (el) el.value = CFG[k];
+  }
+  for (const k of ['require_confirmation','require_pdh_pdl','require_cvd','require_chikou','require_tenkan_kijun']) {
+    const el = document.getElementById('cf-' + k); if (el) el.checked = !!CFG[k];
+  }
+  renderWatchlist();
+}
+function renderWatchlist() {
+  const list = document.getElementById('wl-list');
+  list.innerHTML = (CFG.symbols || []).map(s => `
+    <div class="wl-item">
+      <label class="switch"><input type="checkbox" data-toggle="${s.name}" ${s.enabled ? 'checked' : ''}><span class="slider"></span></label>
+      <div><b>${s.name}</b><div class="k">${s.key}${s.futures_key ? ' · ' + s.futures_key : ''}</div></div>
+      <button class="rm" data-remove="${s.name}">🗑</button>
+    </div>`).join('') || '<p class="sub">empty</p>';
+  list.querySelectorAll('[data-remove]').forEach(b => b.onclick = () => symAction('remove', {name: b.dataset.remove}));
+  list.querySelectorAll('[data-toggle]').forEach(b => b.onchange = () =>
+    symAction('toggle', {name: b.dataset.toggle, enabled: b.checked}));
+}
+async function symAction(action, extra) {
+  const {ok, data} = await postJSON('/api/momentum/symbols', Object.assign({action}, extra));
+  toast(data.message, ok);
+  if (ok) { CFG.symbols = data.symbols; renderWatchlist(); refresh(); }
+}
+
+document.getElementById('cf-save').onclick = async () => {
+  const body = {};
+  for (const k of ['min_gap_pct','min_rvol','min_oi_change_pct','min_depth_ratio','delta_min','delta_max'])
+    body[k] = parseFloat(document.getElementById('cf-' + k).value);
+  body.opening_window_minutes = parseInt(document.getElementById('cf-opening_window_minutes').value);
+  for (const k of ['require_confirmation','require_pdh_pdl','require_cvd','require_chikou','require_tenkan_kijun'])
+    body[k] = document.getElementById('cf-' + k).checked;
+  const {ok, data} = await postJSON('/api/momentum/config', body);
+  toast(data.message, ok); if (ok) { closeDrawers(); loadConfig(); refresh(); }
+};
+document.getElementById('wl-add').onclick = async () => {
+  const name = document.getElementById('wl-name').value.trim();
+  const key = document.getElementById('wl-key').value.trim();
+  const fut = document.getElementById('wl-fut').value.trim();
+  const {ok, data} = await postJSON('/api/momentum/symbols', {action:'add', name, key, futures_key: fut});
+  toast(data.message, ok);
+  if (ok) { CFG.symbols = data.symbols; renderWatchlist();
+    document.getElementById('wl-name').value=''; document.getElementById('wl-key').value=''; document.getElementById('wl-fut').value=''; refresh(); }
+};
+document.getElementById('tok-btn').onclick = async () => {
+  const {ok, data} = await postJSON('/api/auth/token', {access_token: document.getElementById('tok').value.trim()});
+  toast(data.message, ok); if (ok) refresh();
+};
+
+function openDrawer(id) { document.getElementById(id).classList.add('open'); document.getElementById('backdrop').classList.add('show'); }
+function closeDrawers() {
+  document.querySelectorAll('.drawer').forEach(d => d.classList.remove('open'));
+  document.getElementById('backdrop').classList.remove('show');
+}
+document.getElementById('btn-config').onclick = () => openDrawer('drawer-config');
+document.getElementById('btn-watchlist').onclick = () => openDrawer('drawer-watchlist');
+document.getElementById('backdrop').onclick = closeDrawers;
+document.querySelectorAll('[data-close]').forEach(b => b.onclick = closeDrawers);
+
+loadConfig();
+refresh();
+setInterval(refresh, REFRESH);
+</script>
+</body>
+</html>

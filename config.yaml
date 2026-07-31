@@ -121,6 +121,64 @@ live:
 # index's own points, so each index needs its own floor (BANKNIFTY moves in the
 # hundreds while MIDCPNIFTY moves in the tens). Roughly scaled to ~0.05% of the
 # index level. Omit the field on an index to inherit strategy.min_cloud_thickness.
+# ---------------------------------------------------------------------------
+# NSE Intraday Momentum Option Strategy (BRD REQ-NSE-OPT-2026-V1)
+# A separate, stock-options momentum system operated entirely from the
+# /momentum web page. It screens the watchlist below on BOTH 1m and 5m:
+#   1. gap %, relative volume, near-month futures ΔOI, bid/ask depth imbalance
+#   2. directional matrix (price × ΔOI) -> Buy ITM Call / Put / Avoid
+#   3. false-breakout filters: 2-candle confirmation, PDH/PDL hold, CVD
+#   4. Ichimoku Kumo trend retention (Tenkan/Kijun, Chikou, Kijun-sen hold)
+#   5. Kijun-sen trailing exit
+# Every threshold here is also editable live from the page's "Strategy Filters".
+momentum:
+  timeframes_minutes: [1, 5]
+  screening:
+    min_gap_pct: 1.5          # |Gap %| >= 1.5
+    min_rvol: 3.0             # opening-window RVOL >= 3.0
+    min_oi_change_pct: 3.0    # near-month futures ΔOI >= +3.0 %
+    min_depth_ratio: 2.5      # buy/sell order-book depth >= 2.5 : 1 (or <= 1 : 2.5)
+    opening_window_minutes: 5 # the 09:15–09:20 volume / range window
+  filters:
+    require_confirmation: true  # BRD Rule 1 — 2-candle confirmation
+    require_pdh_pdl: true       # BRD Rule 2 — Previous Day High/Low retest & hold
+    require_cvd: true           # BRD Rule 3 — Cumulative Volume Delta sign
+  ichimoku:
+    tenkan: 9
+    kijun: 26
+    senkou_b: 52
+    displacement: 26
+    chikou_period: 26
+    require_chikou: true
+    require_tenkan_kijun: true
+  options:
+    # Slightly ITM / ATM per the BRD (delta 0.50–0.65), max 1 % capital risk.
+    delta_min: 0.50
+    delta_max: 0.65
+    target_delta: 0.58
+    max_risk_pct: 1.0
+  # Watchlist of NSE F&O stocks. `key` is the Upstox equity instrument key;
+  # `futures_key` (optional) is the near-month futures key that powers the ΔOI
+  # build-up gate — without it the OI check shows as unavailable. Find keys with:
+  #   python -m onlyichu instruments --search "RELIANCE"
+  # Symbols are also addable/removable live from the page's "Watchlist" drawer.
+  symbols:
+    - name: RELIANCE
+      key: "NSE_EQ|INE002A01018"
+      enabled: true
+    - name: HDFCBANK
+      key: "NSE_EQ|INE040A01034"
+      enabled: true
+    - name: ICICIBANK
+      key: "NSE_EQ|INE090A01021"
+      enabled: true
+    - name: INFY
+      key: "NSE_EQ|INE009A01021"
+      enabled: true
+    - name: TATAMOTORS
+      key: "NSE_EQ|INE155A01022"
+      enabled: true
+
 instruments:
   - name: NIFTY
     key: "NSE_INDEX|Nifty 50"

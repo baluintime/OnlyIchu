@@ -205,6 +205,58 @@ positions are left untouched), pick the other mode, and START again. The
 status pill shows which engine is running; the strip below mirrors the running
 engine's positions and realized PnL.
 
+### NSE Intraday Momentum strategy (`/momentum` — operated entirely from the page)
+
+A second, self-contained strategy ships alongside the Ichimoku system,
+implementing the BRD **NSE Intraday Option Trade Selection & Execution System**
+(`REQ-NSE-OPT-2026-V1`). It is a **stock-options momentum screener** — a
+different beast from the index Ichimoku engine — and is driven **100% from the
+web page** (no command line beyond starting the server): open the dashboard,
+click **⚡ Momentum** in the header (or go to `http://127.0.0.1:8080/momentum`).
+
+It screens a watchlist of NSE F&O stocks on **both the 1-minute and 5-minute
+timeframes** (the BRD's 5m/15m is retimed to 1m/5m here) through the BRD's five
+stacked layers, and shows for every symbol, per timeframe, exactly which checks
+passed, failed, or had no data:
+
+1. **Pre-open screening** — absolute **gap %** (≥ 1.5), **relative volume**
+   (RVOL ≥ 3.0 over the opening window), near-month futures **ΔOI build-up**
+   (≥ +3 %), and **bid/ask depth imbalance** (≥ 2.5 : 1). Gap and RVOL come from
+   Upstox candles; depth from the full market quote; ΔOI from the near-month
+   **futures** intraday candles (set a `futures_key` on the symbol to enable it).
+2. **Directional matrix** — price direction × futures ΔOI classifies the move as
+   **LONG BUILD-UP → Buy ITM Call**, **SHORT BUILD-UP → Buy ITM Put**, or
+   **SHORT COVERING / LONG UNWINDING → Avoid**.
+3. **False-breakout filters** — the **2-candle confirmation** rule (no entry on
+   the opening candle; wait for a later candle to close beyond its high/low),
+   **Previous Day High/Low retest & hold** (a break that closes back inside the
+   prior range is rejected as a liquidity grab), and **Cumulative Volume Delta**
+   (a candle-body CVD proxy whose sign must confirm direction).
+4. **Ichimoku Kumo trend retention** — price strictly outside the cloud,
+   **Tenkan/Kijun** alignment, **Chikou span** clear, and the **Kijun-sen hold**,
+   computed server-side on each timeframe with historical warmup.
+5. **Exit** — a candle closing on the opposite side of the **Kijun-sen** raises a
+   *"close any open position"* warning on the affected pipeline.
+
+Each pipeline card shows the action badge (**BUY CALL** / **BUY PUT** / **AVOID**,
+glowing when every required layer is green and the trade is *ready*), a
+conviction bar, the classification, the full pass/fail/na check list with
+human-readable detail, and the live Kijun/cloud levels. Symbols with a
+trade-ready pipeline sort to the top and are highlighted.
+
+Everything is adjustable **live from the page** — no restart, no config edit:
+
+- **⚙ Strategy Filters** drawer: every BRD threshold (gap, RVOL, ΔOI, depth,
+  opening window, delta band) and each filter toggle (confirmation, PDH/PDL,
+  CVD, Chikou, Tenkan/Kijun). Changes apply on the next refresh.
+- **☰ Watchlist** drawer: add/remove/enable stocks and their equity + futures
+  instrument keys.
+
+Defaults and the starter watchlist live under `momentum:` in `config.yaml`; the
+page polls `/api/momentum` every `web.refresh_seconds`. This strategy currently
+produces **signals + full screening transparency** (it does not place orders
+through the live engine — the Ichimoku engine remains the order path).
+
 ### Other commands
 
 ```bash
@@ -237,8 +289,10 @@ onlyichu/
   broker.py      PaperBroker (simulated) and LiveBroker (real orders)
   engine.py      polling loop, session windows, risk guards, square-off
   backtest.py    historical replay of the signal logic
-  web.py         Flask dashboard: candle fetch + Ichimoku snapshot API
-  templates/     animated auto-refreshing dashboard page
+  web.py         Flask dashboard: candle fetch + Ichimoku snapshot API + routes
+  momentum.py    NSE Intraday Momentum core (screening/matrix/filters/Kumo)
+  momentum_web.py live data plumbing for the /momentum page (1m & 5m)
+  templates/     animated auto-refreshing dashboard + momentum pages
   cli.py         login / instruments / run / web / backtest / status
 ```
 
