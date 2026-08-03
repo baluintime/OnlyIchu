@@ -133,6 +133,16 @@ live:
 # Every threshold here is also editable live from the page's "Strategy Filters".
 momentum:
   timeframes_minutes: [1, 5]
+  # Auto F&O universe mode: instead of a fixed watchlist, scan the WHOLE NSE F&O
+  # stock universe at each scan time, rank every stock by conviction, and lock the
+  # top N candidates for the session — those are shown on the page and managed
+  # (entry confirmation + Kijun-sen exit) until the next scan. The scheduler runs
+  # inside `python -m onlyichu web`; a "⟳ Scan F&O now" button triggers it on demand.
+  universe:
+    auto: true
+    top_n: 3
+    scan_times: ["09:15", "13:00"]   # IST — morning open + post-lunch
+    limit: 0                         # cap symbols scanned (0 = whole universe)
   screening:
     min_gap_pct: 1.5          # |Gap %| >= 1.5
     min_rvol: 3.0             # opening-window RVOL >= 3.0

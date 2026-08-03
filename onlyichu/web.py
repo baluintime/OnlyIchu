@@ -705,6 +705,16 @@ def create_app(cfg: Config, api: UpstoxAPI, token: str | None = None) -> Flask:
             for s in cfg.momentum_symbols
         ]}), (200 if ok else 400)
 
+    @app.post("/api/momentum/scan")
+    def api_momentum_scan():  # type: ignore[unused-variable]
+        if not momentum.api.has_token:
+            return jsonify({"ok": False, "message": "connect Upstox first"}), 400
+        started = momentum.scan_async()
+        return jsonify({
+            "ok": started,
+            "message": "scanning the NSE F&O universe…" if started else "a scan is already running",
+        }), (200 if started else 409)
+
     @app.get("/api/dashboard")
     def api_dashboard():  # type: ignore[unused-variable]
         payload = dict(service.payload())
@@ -887,11 +897,22 @@ def create_app(cfg: Config, api: UpstoxAPI, token: str | None = None) -> Flask:
         return jsonify({"ok": ok, "message": msg}), (200 if ok else 409)
 
     app.auth_manager = auth_mgr  # type: ignore[attr-defined]
+    app.momentum_service = momentum  # type: ignore[attr-defined]
     return app
 
 
 def run_web(cfg: Config, api: UpstoxAPI, token: str | None = None) -> None:
     app = create_app(cfg, api, token)
     app.auth_manager.verify_stored()  # type: ignore[attr-defined]
+    momentum = app.momentum_service  # type: ignore[attr-defined]
+    if cfg.mom_auto_universe:
+        stop = threading.Event()
+        threading.Thread(
+            target=momentum.run_scheduler, args=(stop,), daemon=True, name="momentum-scheduler"
+        ).start()
+        log.info(
+            "momentum auto-scan enabled — scanning the NSE F&O universe at %s IST",
+            ", ".join(t.strftime("%H:%M") for t in cfg.mom_scan_times),
+        )
     log.info("dashboard on http://%s:%d (refresh every %ds)", cfg.web_host, cfg.web_port, cfg.web_refresh_seconds)
     app.run(host=cfg.web_host, port=cfg.web_port, debug=False, threaded=True)

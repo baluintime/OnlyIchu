@@ -214,10 +214,23 @@ different beast from the index Ichimoku engine — and is driven **100% from the
 web page** (no command line beyond starting the server): open the dashboard,
 click **⚡ Momentum** in the header (or go to `http://127.0.0.1:8080/momentum`).
 
-It screens a watchlist of NSE F&O stocks on **both the 1-minute and 5-minute
-timeframes** (the BRD's 5m/15m is retimed to 1m/5m here) through the BRD's five
-stacked layers, and shows for every symbol, per timeframe, exactly which checks
-passed, failed, or had no data:
+**Auto F&O universe mode (default):** instead of a fixed list, the page scans
+the **whole NSE F&O stock universe**, ranks every stock by conviction, and
+**locks the top 3 candidates** for the session. Scans run automatically at
+**09:15** (market open) and **13:00** IST — the BRD's screening + post-lunch
+re-assessment — and can be triggered any time with **⟳ Scan F&O now**. Between
+scans the 3 locked picks are retained and managed live (entry confirmation +
+Kijun-sen exit). The scan bar shows the mode, universe size, last/next scan time,
+live scan progress, and the ranked leaderboard (locked picks highlighted). Turn
+it off (`momentum.universe.auto: false`) to screen the fixed `symbols:` watchlist
+instead; `top_n`, `scan_times` and a `limit` (cap stocks scanned) are configurable.
+The F&O universe is built from Upstox's instrument master — every stock with a
+near-month futures contract; index futures are excluded.
+
+Whichever mode is active, each stock is screened on **both the 1-minute and
+5-minute timeframes** (the BRD's 5m/15m is retimed to 1m/5m here) through the
+BRD's five stacked layers, showing for every symbol, per timeframe, exactly which
+checks passed, failed, or had no data:
 
 1. **Pre-open screening** — absolute **gap %** (≥ 1.5), **relative volume**
    (RVOL ≥ 3.0 over the opening window), near-month futures **ΔOI build-up**
@@ -291,7 +304,8 @@ onlyichu/
   backtest.py    historical replay of the signal logic
   web.py         Flask dashboard: candle fetch + Ichimoku snapshot API + routes
   momentum.py    NSE Intraday Momentum core (screening/matrix/filters/Kumo)
-  momentum_web.py live data plumbing for the /momentum page (1m & 5m)
+  fno_universe.py builds the NSE F&O stock universe from the instrument master
+  momentum_web.py live data + universe scanner for the /momentum page (1m & 5m)
   templates/     animated auto-refreshing dashboard + momentum pages
   cli.py         login / instruments / run / web / backtest / status
 ```

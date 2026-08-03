@@ -135,6 +135,13 @@ class Config:
     mom_max_risk_pct: float = 1.0
     mom_timeframes_minutes: list[int] = field(default_factory=lambda: [1, 5])
     momentum_symbols: list[MomentumSymbol] = field(default_factory=list)
+    # Auto F&O universe mode: scan the whole NSE F&O stock universe at the
+    # scheduled times, rank by conviction, and lock the top N candidates for the
+    # session. When off, the fixed momentum_symbols watchlist is used instead.
+    mom_auto_universe: bool = True
+    mom_top_n: int = 3
+    mom_scan_times: list[time] = field(default_factory=lambda: [time(9, 15), time(13, 0)])
+    mom_universe_limit: int = 0  # cap symbols scanned (0 = whole universe)
 
     @property
     def enabled_instruments(self) -> list[IndexConfig]:
@@ -297,6 +304,12 @@ def load_config(path: str = "config.yaml") -> Config:
     cfg.mom_max_risk_pct = float(mopt.get("max_risk_pct", cfg.mom_max_risk_pct))
     if mom.get("timeframes_minutes"):
         cfg.mom_timeframes_minutes = list(mom.get("timeframes_minutes"))
+    uni = mom.get("universe", {}) or {}
+    cfg.mom_auto_universe = bool(uni.get("auto", cfg.mom_auto_universe))
+    cfg.mom_top_n = int(uni.get("top_n", cfg.mom_top_n))
+    cfg.mom_universe_limit = int(uni.get("limit", cfg.mom_universe_limit))
+    if uni.get("scan_times"):
+        cfg.mom_scan_times = [_parse_time(t, time(9, 15)) for t in uni.get("scan_times")]
     cfg.momentum_symbols = [
         MomentumSymbol(
             name=item["name"],

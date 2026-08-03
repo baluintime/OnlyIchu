@@ -85,6 +85,21 @@
   .legend b { font-weight: 700; }
   .legend .g { color: var(--green); } .legend .r { color: var(--red); } .legend .n { color: var(--amber); }
 
+  .scanbar { margin-top: 12px; padding: 10px 16px; border-radius: 14px; display:flex; align-items:center;
+    gap: 14px; flex-wrap: wrap; font-size: 12.5px; color: var(--muted);
+    border: 1px solid var(--card-border); background: rgba(255,255,255,.03); }
+  .scanbar .mode { font-weight: 800; letter-spacing: .8px; font-size: 11px; padding: 4px 10px; border-radius: 999px;
+    color: var(--violet); background: rgba(139,124,246,.12); border: 1px solid rgba(139,124,246,.35); }
+  .scanbar .mode.watch { color: var(--muted); background: rgba(255,255,255,.05); border-color: var(--card-border); }
+  .scanbar #scan-info b { color: var(--text); font-weight: 700; }
+  .scanbar.scanning { border-color: rgba(34,197,94,.4); }
+  .ranked { display:flex; gap: 7px; flex-wrap: wrap; margin-left: auto; }
+  .ranked .r-item { font-size: 11px; padding: 3px 9px; border-radius: 999px; border:1px solid var(--card-border);
+    background: rgba(0,0,0,.25); color: var(--muted); display:inline-flex; gap:6px; align-items:center; }
+  .ranked .r-item.lock { border-color: rgba(34,197,94,.4); color: var(--text); }
+  .ranked .r-item b { color: var(--faint); font-weight: 700; font-variant-numeric: tabular-nums; }
+  .ranked .r-item .ce { color: var(--green); } .ranked .r-item .pe { color: var(--red); }
+
   .banner { margin-top: 14px; padding: 14px 18px; border-radius: 14px; font-size: 13.5px;
     border: 1px solid rgba(245,185,60,.3); background: var(--amber-soft); color: var(--amber); display:none; }
   .banner.show { display:block; }
@@ -199,6 +214,7 @@
   </header>
 
   <div class="toolbar">
+    <button class="btn go" id="btn-scan">⟳ Scan F&amp;O now</button>
     <button class="btn cyan" id="btn-config">⚙ Strategy Filters</button>
     <button class="btn cyan" id="btn-watchlist">☰ Watchlist</button>
     <span id="sub" class="chip">—</span>
@@ -208,6 +224,12 @@
       <span><b class="n">●</b> n/a</span>
       <span>BUY CALL = ITM CE · BUY PUT = ITM PE</span>
     </div>
+  </div>
+
+  <div class="scanbar" id="scanbar">
+    <span class="mode" id="scan-mode">—</span>
+    <span id="scan-info">—</span>
+    <div class="ranked" id="ranked"></div>
   </div>
 
   <div class="banner" id="banner"></div>
@@ -338,6 +360,7 @@ async function refresh() {
   const th = (d.strategy && d.strategy.thresholds) || {};
   document.getElementById('sub').textContent =
     `gap≥${th.gap_pct}% · RVOL≥${th.rvol} · ΔOI≥${th.oi_change_pct}% · depth≥${th.depth_ratio}:1 · Δ${th.delta ? th.delta[0]+'–'+th.delta[1] : ''}`;
+  renderScan(d.scan || {});
 
   const connected = d.connected;
   document.getElementById('connect').classList.toggle('show', !connected);
@@ -348,8 +371,49 @@ async function refresh() {
   const grid = document.getElementById('grid'), empty = document.getElementById('empty');
   const syms = d.symbols || [];
   if (!connected) { grid.innerHTML = ''; empty.style.display = 'none'; return; }
-  empty.style.display = syms.length ? 'none' : 'block';
+  const auto = d.scan && d.scan.mode === 'universe';
+  if (!syms.length) {
+    empty.style.display = 'block';
+    empty.innerHTML = auto
+      ? (d.scan && d.scan.scanning
+          ? 'Scanning the NSE F&amp;O universe for the top ' + (d.scan.top_n||3) + ' candidates…'
+          : 'Awaiting the first scan — runs automatically at ' + ((d.scan&&d.scan.scan_times||[]).join(' & ')) + ' IST, or press <b>⟳ Scan F&amp;O now</b>.')
+      : 'No symbols on the watchlist yet — open <b>☰ Watchlist</b> to add NSE F&amp;O stocks.';
+  } else empty.style.display = 'none';
   grid.innerHTML = syms.map(renderSymbol).join('');
+}
+
+function renderScan(s) {
+  const modeEl = document.getElementById('scan-mode');
+  const bar = document.getElementById('scanbar');
+  const info = document.getElementById('scan-info');
+  const ranked = document.getElementById('ranked');
+  if (s.mode !== 'universe') {
+    modeEl.textContent = 'WATCHLIST'; modeEl.className = 'mode watch';
+    info.innerHTML = 'Fixed watchlist mode — auto F&amp;O scanning is off.';
+    ranked.innerHTML = ''; bar.classList.remove('scanning');
+    document.getElementById('btn-scan').style.display = 'none';
+    return;
+  }
+  document.getElementById('btn-scan').style.display = '';
+  modeEl.textContent = 'AUTO F&O · TOP ' + (s.top_n || 3); modeEl.className = 'mode';
+  bar.classList.toggle('scanning', !!s.scanning);
+  let txt;
+  if (s.scanning) {
+    const [i, n] = s.progress || [0, 0];
+    txt = `<b>Scanning…</b> ${i}/${n || '?'} of the F&amp;O universe`;
+  } else {
+    txt = `universe <b>${s.universe_size || 0}</b> stocks · last scan <b>${s.last_scan_at || '—'}</b> · next <b>${s.next_scan_at || '—'}</b>`;
+  }
+  if (s.error) txt += ` · <span style="color:var(--red)">${s.error}</span>`;
+  info.innerHTML = txt;
+  const locked = new Set(s.locked || []);
+  ranked.innerHTML = (s.ranked || []).slice(0, 12).map(r => {
+    const cls = r.action === 'BUY CALL' ? 'ce' : r.action === 'BUY PUT' ? 'pe' : '';
+    return `<span class="r-item ${locked.has(r.name) ? 'lock' : ''}">${r.name}
+      <b>${r.score != null ? r.score : ''}</b>
+      <span class="${cls}">${r.trade_ready ? '●' : ''}</span></span>`;
+  }).join('');
 }
 
 /* ---------- config drawer ---------- */
@@ -411,6 +475,10 @@ function closeDrawers() {
   document.querySelectorAll('.drawer').forEach(d => d.classList.remove('open'));
   document.getElementById('backdrop').classList.remove('show');
 }
+document.getElementById('btn-scan').onclick = async () => {
+  const {ok, data} = await postJSON('/api/momentum/scan', {});
+  toast(data.message, ok); if (ok) setTimeout(refresh, 800);
+};
 document.getElementById('btn-config').onclick = () => openDrawer('drawer-config');
 document.getElementById('btn-watchlist').onclick = () => openDrawer('drawer-watchlist');
 document.getElementById('backdrop').onclick = closeDrawers;
