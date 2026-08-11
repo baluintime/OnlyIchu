@@ -99,6 +99,10 @@ class Engine:
         self._halt_reason = ""
         self._sync_ok = True
         self._position_mismatch: list[dict] = []
+        # how many consecutive reconcile cycles each instrument has shown the same
+        # mismatch. A one-cycle blip (Upstox's position feed lagging a just-placed
+        # fill) must NOT trigger a drop/square-off — only a mismatch that persists.
+        self._mismatch_streak: dict[str, int] = {}
         self._stop = threading.Event()
         # latest entry-skip reason per pipeline, surfaced on the dashboard
         self.last_skips: dict[str, dict] = {}
@@ -370,7 +374,13 @@ class Engine:
         return "squared"
 
     def _drop_phantom(self, key: str, excess: int) -> None:
-        """App holds more than Upstox — those were closed outside the app; drop them."""
+        """App holds more than Upstox — those were closed outside the app; drop them.
+        Never drop a strike we ordered moments ago: its exit/entry fill may not have
+        reflected on Upstox yet, and dropping it here is what caused the enter ->
+        'closed externally' -> re-enter churn."""
+        if self.broker.recently_ordered(key):
+            log.info("reconcile: not dropping %s — ordered very recently (fill may be in flight)", key)
+            return
         for pos in list(self.broker.open_positions()):
             if excess <= 0:
                 break
@@ -387,14 +397,40 @@ class Engine:
             self._sync_ok = True
             return True
         mismatches = self.broker.reconcile()
+
+        # How many consecutive cycles a PHANTOM (app holds more than Upstox) must
+        # persist before we drop it. A one-cycle blip is almost always Upstox's
+        # position feed lagging a just-placed fill, not a real external close, and
+        # dropping on that blip is what caused the enter -> "closed externally" ->
+        # re-enter churn. Orphans (Upstox holds more) are healed immediately as
+        # before — _heal_orphan already guards against acting on a fresh order.
+        PHANTOM_CONFIRM_CYCLES = 2
+        seen_phantom: set[str] = set()
         for m in mismatches:
+            key = m["instrument"]
             try:
                 if m["upstox_qty"] > m["app_qty"]:
-                    self._heal_orphan(m["instrument"], m["symbol"], m["upstox_qty"] - m["app_qty"], m.get("avg", 0.0))
+                    self._heal_orphan(key, m["symbol"], m["upstox_qty"] - m["app_qty"], m.get("avg", 0.0))
                 elif m["app_qty"] > m["upstox_qty"]:
-                    self._drop_phantom(m["instrument"], m["app_qty"] - m["upstox_qty"])
+                    seen_phantom.add(key)
+                    if self.broker.recently_ordered(key):
+                        self._mismatch_streak.pop(key, None)  # fill in flight — reset
+                        log.info("reconcile: %s phantom but ordered recently — deferring", m["symbol"])
+                        continue
+                    self._mismatch_streak[key] = self._mismatch_streak.get(key, 0) + 1
+                    if self._mismatch_streak[key] >= PHANTOM_CONFIRM_CYCLES:
+                        self._drop_phantom(key, m["app_qty"] - m["upstox_qty"])
+                        self._mismatch_streak.pop(key, None)
+                    else:
+                        log.info("reconcile: %s phantom cycle %d/%d — waiting to confirm",
+                                 m["symbol"], self._mismatch_streak[key], PHANTOM_CONFIRM_CYCLES)
             except Exception as exc:  # noqa: BLE001 - healing is best-effort; stay paused if it fails
                 log.error("reconcile heal failed for %s: %s", m.get("symbol"), exc)
+        # forget phantom streaks for instruments no longer showing a phantom
+        for key in list(self._mismatch_streak):
+            if key not in seen_phantom:
+                self._mismatch_streak.pop(key, None)
+
         if mismatches:
             mismatches = self.broker.reconcile()  # re-check after healing
         unconfirmed = getattr(self.broker, "pending_unconfirmed", False)

@@ -177,6 +177,16 @@ red banner naming the instrument. At startup it seeds the live book from Upstox,
 and square-off reconciles against Upstox first. Paper mode is always its own
 source of truth.
 
+**Feed-lag guard (no drop-churn):** Upstox's position feed lags a just-placed
+fill by a few seconds, so a freshly opened position can momentarily look
+"missing" on Upstox. The reconciler therefore **never drops a strike it ordered
+within the last ~20s**, and a phantom (app holds more than Upstox) must **persist
+for two consecutive cycles** before it's dropped. This prevents the
+enter → *"closed externally"* → re-enter loop that would otherwise flatten a
+position seconds after opening it (real buy/sell round-trips piling up slippage)
+while the dashboard read `0 open positions`. Orphans are still adopted/squared
+off immediately.
+
 **Live P&L and daily profit target:** while the engine runs, the account strip
 shows **Unrealized MTM** and **Total P&L** (realized + unrealized) alongside
 realized, and each open-position chip shows its **strike, entry, current LTP and

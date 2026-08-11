@@ -100,9 +100,34 @@ def test_phantom_dropped_when_upstox_flat(tmp_path):
     e = make_engine(tmp_path, [])  # Upstox holds nothing
     e.broker.state.positions["NIFTY:1m"] = Position(
         "NIFTY:1m", "NSE_FO|1", "NIFTY 24050 CE", 65, 240.0, "t", "LONG")
-    assert e.reconcile_positions() is True  # phantom dropped -> in sync
+    # a phantom must persist for 2 cycles before being dropped (feed-lag guard)
+    assert e.reconcile_positions() is False           # cycle 1: not yet confirmed
+    assert e.broker.open_positions()                  # still held
+    assert e.reconcile_positions() is True            # cycle 2: dropped -> in sync
     assert e.broker.open_positions() == []
     assert e.api.placed == []  # nothing sold (already closed on Upstox)
+
+
+def test_phantom_not_dropped_while_order_in_flight(tmp_path):
+    # THE CHURN FIX: a just-entered position whose fill hasn't reflected on Upstox
+    # must NOT be dropped as "closed externally" — that caused the enter -> drop ->
+    # re-enter loop that showed 0 positions on the dashboard while real orders churned.
+    import time as _t
+
+    e = make_engine(tmp_path, [])  # Upstox feed still shows flat (lagging the fill)
+    e.broker.state.positions["NIFTY:1m"] = Position(
+        "NIFTY:1m", "NSE_FO|1", "NIFTY 24750 PE", 65, 287.70, "t", "SHORT")
+    e.broker._recent_orders["NSE_FO|1"] = _t.time()  # we just bought it
+
+    # any number of cycles while the order is in flight: never dropped
+    for _ in range(5):
+        e.reconcile_positions()
+        held = [p for p in e.broker.open_positions() if p.instrument_key == "NSE_FO|1"]
+        assert held and held[0].qty == 65   # position preserved
+    # once Upstox reflects the fill, there's no mismatch at all -> in sync, still held
+    e.api._positions = [upos("NSE_FO|1", 65, 287.70, "NIFTY 24750 PE")]
+    assert e.reconcile_positions() is True
+    assert e.broker.position("NIFTY:1m") is not None
 
 
 def test_orphan_zero_avg_adopts_at_ltp(tmp_path):
