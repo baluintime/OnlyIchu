@@ -436,7 +436,8 @@
 
   <div class="paper" id="paperStrip">
     <div class="kv"><small id="cashLabel">Paper cash</small><b id="paperCash">—</b></div>
-    <div class="kv"><small>Realized PnL <span id="paperDate"></span></small><b id="paperPnl">—</b></div>
+    <div class="kv"><small>Realized PnL (net) <span id="paperDate"></span></small><b id="paperPnl">—</b></div>
+    <div class="kv" id="kvCharges" style="display:none"><small>Charges today</small><b id="paperCharges">—</b></div>
     <div class="kv" id="kvUnreal" style="display:none"><small>Unrealized MTM</small><b id="paperUnreal">—</b></div>
     <div class="kv" id="kvTotal" style="display:none"><small>Total P&amp;L</small><b id="paperTotal">—</b></div>
     <div class="kv" id="kvTarget" style="display:none"><small>Target</small><b id="paperTarget">—</b></div>
@@ -762,6 +763,13 @@ function renderAccount(data) {
   const colorOf = (v) => v > 0 ? "var(--green)" : v < 0 ? "var(--red)" : "var(--text)";
   // live-only extras: unrealized MTM, total P&L, and target progress
   const live = t && t.running;
+  const chargesToday = (t && t.running) ? t.charges_today
+    : (data.paper ? data.paper.charges_today : null);
+  $("kvCharges").style.display = (chargesToday != null && chargesToday > 0) ? "" : "none";
+  if (chargesToday != null && chargesToday > 0) {
+    setText($("paperCharges"), "-₹ " + fmt.format(chargesToday), true);
+    $("paperCharges").style.color = "var(--red)";
+  }
   $("kvUnreal").style.display = live && t.unrealized_pnl != null ? "" : "none";
   $("kvTotal").style.display = live && t.total_pnl != null ? "" : "none";
   $("kvTarget").style.display = live && t.profit_target ? "" : "none";

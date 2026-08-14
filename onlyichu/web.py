@@ -307,6 +307,7 @@ class DashboardService:
         return {
             "cash": state.get("cash"),
             "realized_pnl_today": state.get("realized_pnl_today"),
+            "charges_today": state.get("charges_today"),
             "pnl_date": state.get("pnl_date"),
             "positions": positions,
         }
@@ -427,6 +428,7 @@ class TradingController:
             "positions": [],
             "realized_pnl_today": None,
             "unrealized_pnl": None,
+            "charges_today": None,
             "total_pnl": None,
             "profit_target": None,
             "halted": False,
@@ -446,6 +448,7 @@ class TradingController:
             st["realized_pnl_today"] = realized
             st["unrealized_pnl"] = unrealized
             st["total_pnl"] = realized + unrealized
+            st["charges_today"] = broker.state.charges_today
             st["profit_target"] = engine.cfg.daily_profit_target or None
             st["halted"] = engine._halted
             st["halt_reason"] = engine._halt_reason or None

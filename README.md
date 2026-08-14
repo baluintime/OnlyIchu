@@ -187,6 +187,17 @@ position seconds after opening it (real buy/sell round-trips piling up slippage)
 while the dashboard read `0 open positions`. Orphans are still adopted/squared
 off immediately.
 
+**Net P&L (charges deducted):** with `charges.apply_charges: true` (default),
+every trade's estimated **brokerage, STT, exchange transaction charge, SEBI fee,
+stamp duty and GST** are deducted so realized P&L, total P&L and the profit
+target all reflect the **net** figure your broker reports (Gross P&L − charges =
+Net P&L), not gross. Open positions' unrealized MTM is shown net of the charges
+it would cost to close them, and the strip shows **Charges today**. Rates follow
+the current NSE/Upstox F&O options schedule and are configurable under
+`charges:` in `config.yaml` — tune them to match your contract notes exactly, or
+set `apply_charges: false` to report gross. The trade log gains a `charges`
+column per fill.
+
 **Live P&L and daily profit target:** while the engine runs, the account strip
 shows **Unrealized MTM** and **Total P&L** (realized + unrealized) alongside
 realized, and each open-position chip shows its **strike, entry, current LTP and

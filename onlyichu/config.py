@@ -77,6 +77,16 @@ class Config:
     min_open_interest: int = 0
     max_spread_pct: float = 0.0
 
+    # --- charges: deduct estimated brokerage/taxes so P&L is NET (like Upstox) ---
+    apply_charges: bool = False
+    brokerage_per_order: float = 20.0
+    brokerage_pct: float = 0.0
+    stt_sell_pct: float = 0.001
+    exchange_txn_pct: float = 0.0003503
+    sebi_pct: float = 0.000001
+    stamp_buy_pct: float = 0.00003
+    gst_pct: float = 0.18
+
     lots_per_trade: int = 1
     max_trades_per_day_per_pipeline: int = 10
     max_daily_loss: float = 10000.0
@@ -160,6 +170,16 @@ def load_config(path: str = "config.yaml") -> Config:
     cfg.min_volume = int(opts.get("min_volume", cfg.min_volume))
     cfg.min_open_interest = int(opts.get("min_open_interest", cfg.min_open_interest))
     cfg.max_spread_pct = float(opts.get("max_spread_pct", cfg.max_spread_pct))
+
+    ch = raw.get("charges", {}) or {}
+    cfg.apply_charges = bool(ch.get("apply_charges", cfg.apply_charges))
+    cfg.brokerage_per_order = float(ch.get("brokerage_per_order", cfg.brokerage_per_order))
+    cfg.brokerage_pct = float(ch.get("brokerage_pct", cfg.brokerage_pct))
+    cfg.stt_sell_pct = float(ch.get("stt_sell_pct", cfg.stt_sell_pct))
+    cfg.exchange_txn_pct = float(ch.get("exchange_txn_pct", cfg.exchange_txn_pct))
+    cfg.sebi_pct = float(ch.get("sebi_pct", cfg.sebi_pct))
+    cfg.stamp_buy_pct = float(ch.get("stamp_buy_pct", cfg.stamp_buy_pct))
+    cfg.gst_pct = float(ch.get("gst_pct", cfg.gst_pct))
 
     risk = raw.get("risk", {}) or {}
     cfg.lots_per_trade = int(risk.get("lots_per_trade", cfg.lots_per_trade))

@@ -92,6 +92,20 @@ web:
   # Browser auto-refresh cadence; the server caches Upstox data for ~half this.
   refresh_seconds: 10
 
+# Trading charges — deducted from P&L so realized/total/target are NET, matching
+# what Upstox reports (Gross P&L − charges = Net P&L). Rates follow the current
+# NSE/Upstox F&O options schedule; tune them to match your contract notes exactly.
+# Set apply_charges: false to report gross P&L.
+charges:
+  apply_charges: true
+  brokerage_per_order: 20        # flat ₹/order (F&O); charged on entry AND exit
+  brokerage_pct: 0.0             # if > 0, brokerage = min(flat, pct × turnover)
+  stt_sell_pct: 0.001            # STT on option SELL premium (0.1%)
+  exchange_txn_pct: 0.0003503    # NSE options exchange transaction charge
+  sebi_pct: 0.000001             # SEBI turnover fee (₹10 / crore)
+  stamp_buy_pct: 0.00003         # stamp duty on BUY value (0.003%)
+  gst_pct: 0.18                  # GST on (brokerage + exchange txn + SEBI)
+
 risk:
   lots_per_trade: 1
   # Max entries per (index, timeframe) pipeline per day. 0 = unlimited (no cap).

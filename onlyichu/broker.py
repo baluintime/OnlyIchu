@@ -18,6 +18,7 @@ import time as _time
 from dataclasses import asdict, dataclass, field, fields
 from datetime import datetime
 
+from .charges import ChargesConfig, round_trip_charges
 from .config import Config
 from .upstox_api import UpstoxAPI, UpstoxError
 
@@ -51,7 +52,8 @@ class Position:
 @dataclass
 class BrokerState:
     cash: float = 0.0
-    realized_pnl_today: float = 0.0
+    realized_pnl_today: float = 0.0  # NET of charges when charges are enabled
+    charges_today: float = 0.0       # total estimated charges deducted today
     pnl_date: str = ""
     positions: dict[str, Position] = field(default_factory=dict)
 
@@ -64,7 +66,26 @@ class BaseBroker:
         self.state = BrokerState(pnl_date=datetime.now().strftime("%Y-%m-%d"))
         self.trade_log_path = trade_log_path
         self.api = None  # set by subclasses; used for live mark-to-market
+        self.charges = ChargesConfig(
+            enabled=cfg.apply_charges,
+            brokerage_per_order=cfg.brokerage_per_order,
+            brokerage_pct=cfg.brokerage_pct,
+            stt_sell_pct=cfg.stt_sell_pct,
+            exchange_txn_pct=cfg.exchange_txn_pct,
+            sebi_pct=cfg.sebi_pct,
+            stamp_buy_pct=cfg.stamp_buy_pct,
+            gst_pct=cfg.gst_pct,
+        )
         os.makedirs(os.path.dirname(trade_log_path) or ".", exist_ok=True)
+
+    def _charge_cash(self, amount: float) -> None:
+        """Deduct charges from tracked cash (paper only; live cash is broker-side)."""
+
+    def estimated_exit_charges(self, pos: Position, ltp: float | None) -> float:
+        """Estimated round-trip charges to close `pos` now, for net MTM/targets."""
+        if ltp is None or pos.entry_price is None or pos.entry_price <= 0:
+            return 0.0
+        return round_trip_charges(self.charges, pos.entry_price, ltp, pos.qty)
 
     # -- interface -----------------------------------------------------
 
@@ -130,7 +151,8 @@ class BaseBroker:
         fill = self._fill_sell(pos, price_hint)
         if fill is None:
             return None
-        pnl = pos.pnl(fill)
+        gross = pos.pnl(fill)
+        charges = round_trip_charges(self.charges, pos.entry_price or 0.0, fill, pos.qty)
         # sanity guard: a non-positive entry price means the entry was never
         # priced (e.g. an adopted position with a missing avg) — its PnL is
         # meaningless, so record 0 rather than fabricate a huge number.
@@ -139,15 +161,22 @@ class BaseBroker:
                 "%s exit: entry price is %s — PnL untrustworthy, recording 0 (fill %.2f x%d)",
                 pipeline_id, pos.entry_price, fill, pos.qty,
             )
-            pnl = 0.0
+            gross = 0.0
+            charges = 0.0
+        pnl = gross - charges  # NET of brokerage/taxes, like the broker reports
         self._roll_pnl_date()
         self.state.realized_pnl_today += pnl
+        self.state.charges_today += charges
+        self._charge_cash(charges)
         del self.state.positions[pipeline_id]
-        self._log_trade(f"EXIT{(' ' + note) if note else ''}", pos, fill, pnl, index_price=underlying_spot)
+        self._log_trade(
+            f"EXIT{(' ' + note) if note else ''}", pos, fill, pnl,
+            index_price=underlying_spot, charges=charges,
+        )
         self._persist()
         log.info(
-            "%s exited %s @ %.2f pnl=%+.2f (index %s vs entry %s)",
-            pipeline_id, pos.symbol, fill, pnl,
+            "%s exited %s @ %.2f net=%+.2f (gross %+.2f − charges %.2f) (index %s vs entry %s)",
+            pipeline_id, pos.symbol, fill, pnl, gross, charges,
             f"{underlying_spot:.2f}" if underlying_spot is not None else "n/a",
             f"{pos.entry_spot:.2f}" if pos.entry_spot is not None else "n/a",
         )
@@ -173,15 +202,20 @@ class BaseBroker:
         fill = self._fill_sell(tmp, price_hint)
         if fill is None:
             return None
-        pnl = 0.0 if (pos.entry_price is None or pos.entry_price <= 0) else (fill - pos.entry_price) * sell_qty
+        priced = not (pos.entry_price is None or pos.entry_price <= 0)
+        gross = (fill - pos.entry_price) * sell_qty if priced else 0.0
+        charges = round_trip_charges(self.charges, pos.entry_price or 0.0, fill, sell_qty) if priced else 0.0
+        pnl = gross - charges
         self._roll_pnl_date()
         self.state.realized_pnl_today += pnl
+        self.state.charges_today += charges
+        self._charge_cash(charges)
         pos.qty -= sell_qty
         pos.partial_taken = True
-        self._log_trade("PARTIAL EXIT", tmp, fill, pnl)
+        self._log_trade("PARTIAL EXIT", tmp, fill, pnl, charges=charges)
         self._persist()
-        log.info("%s partial exit %s x%d @ %.2f pnl=%+.2f (%d lot(s) left)",
-                 pipeline_id, pos.symbol, sell_qty, fill, pnl, pos.qty // pos.lot_size)
+        log.info("%s partial exit %s x%d @ %.2f net=%+.2f (charges %.2f) (%d lot(s) left)",
+                 pipeline_id, pos.symbol, sell_qty, fill, pnl, charges, pos.qty // pos.lot_size)
         return pnl
 
     def realized_pnl_today(self) -> float:
@@ -204,6 +238,9 @@ class BaseBroker:
             ltp = ltps.get(p.instrument_key)
             upnl = p.pnl(ltp) if ltp is not None else None
             if upnl is not None:
+                # net out the charges it would cost to close, so total P&L and the
+                # daily profit target reflect the NET figure (like the broker's)
+                upnl -= self.estimated_exit_charges(p, ltp)
                 total += upnl
             detail[p.pipeline_id] = {
                 "symbol": p.symbol, "strike": p.strike, "direction": p.direction,
@@ -303,9 +340,11 @@ class BaseBroker:
         if self.state.pnl_date != today:
             self.state.pnl_date = today
             self.state.realized_pnl_today = 0.0
+            self.state.charges_today = 0.0
 
     def _log_trade(
-        self, action: str, pos: Position, price: float, pnl: float, index_price: float | None = None
+        self, action: str, pos: Position, price: float, pnl: float,
+        index_price: float | None = None, charges: float = 0.0,
     ) -> None:
         new_file = not os.path.exists(self.trade_log_path)
         with open(self.trade_log_path, "a", newline="", encoding="utf-8") as fh:
@@ -313,13 +352,13 @@ class BaseBroker:
             if new_file:
                 writer.writerow(
                     ["time", "pipeline", "action", "symbol", "instrument_key",
-                     "direction", "qty", "price", "index_price", "pnl"]
+                     "direction", "qty", "price", "index_price", "pnl", "charges"]
                 )
             writer.writerow(
                 [datetime.now().isoformat(timespec="seconds"), pos.pipeline_id, action,
                  pos.symbol, pos.instrument_key, pos.direction, pos.qty,
                  f"{price:.2f}", f"{index_price:.2f}" if index_price is not None else "",
-                 f"{pnl:.2f}"]
+                 f"{pnl:.2f}", f"{charges:.2f}"]
             )
 
 
@@ -333,6 +372,9 @@ class PaperBroker(BaseBroker):
         self.state.cash = cfg.paper_starting_cash
         self._state_file = cfg.paper_state_file
         self._load()
+
+    def _charge_cash(self, amount: float) -> None:
+        self.state.cash -= amount
 
     def _quote(self, instrument_key: str, price_hint: float | None) -> float | None:
         if self.api is not None:
@@ -373,6 +415,7 @@ class PaperBroker(BaseBroker):
         payload = {
             "cash": self.state.cash,
             "realized_pnl_today": self.state.realized_pnl_today,
+            "charges_today": self.state.charges_today,
             "pnl_date": self.state.pnl_date,
             "positions": {k: asdict(v) for k, v in self.state.positions.items()},
         }
@@ -387,6 +430,7 @@ class PaperBroker(BaseBroker):
                 payload = json.load(fh)
             self.state.cash = float(payload.get("cash", self.state.cash))
             self.state.realized_pnl_today = float(payload.get("realized_pnl_today", 0.0))
+            self.state.charges_today = float(payload.get("charges_today", 0.0))
             self.state.pnl_date = payload.get("pnl_date", self.state.pnl_date)
             known = {f.name for f in fields(Position)}
             self.state.positions = {
