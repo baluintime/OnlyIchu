@@ -47,13 +47,18 @@ class StrategyConfig:
     macd_slow: int = 26
     macd_signal: int = 9
     min_cloud_thickness: float = 0.0
-    exit_mode: str = "any_level"  # 'any_level' (original) | 'kijun' (tiered)
+    exit_mode: str = "any_level"  # 'any_level' (original) | 'kijun' (tiered) | 'macd' (momentum fade)
+
+    @property
+    def _needs_macd(self) -> bool:
+        return self.use_macd or self.exit_mode == "macd"
 
     @property
     def min_candles(self) -> int:
         need = self.ich.min_candles
-        if self.use_macd:
-            need = max(need, self.macd_slow + self.macd_signal)
+        if self._needs_macd:
+            # +1 so the PREVIOUS histogram (for the macd slope exit) is available too
+            need = max(need, self.macd_slow + self.macd_signal + 1)
         if self.use_chikou:
             need = max(need, self.chikou_period + 1)
         return need
@@ -89,6 +94,7 @@ class Eval:
     close: float
     state: IchimokuState | None
     macd_hist: float | None
+    prev_macd_hist: float | None
     chikou_ok_long: bool
     chikou_ok_short: bool
     thickness: float | None
@@ -112,8 +118,13 @@ def evaluate(
         return None
     close = closes[i]
 
-    # MACD histogram confluence
-    hist = macd_hist(closes[: i + 1], sc.macd_fast, sc.macd_slow, sc.macd_signal) if sc.use_macd else None
+    # MACD histogram (current + previous). Computed when the entry filter needs it
+    # OR the exit mode is 'macd' (which compares the last two histograms).
+    hist = prev_hist = None
+    if sc._needs_macd:
+        hist = macd_hist(closes[: i + 1], sc.macd_fast, sc.macd_slow, sc.macd_signal)
+        if i >= 1:
+            prev_hist = macd_hist(closes[:i], sc.macd_fast, sc.macd_slow, sc.macd_signal)
     macd_ok_long = (not sc.use_macd) or (hist is not None and hist > 0)
     macd_ok_short = (not sc.use_macd) or (hist is not None and hist < 0)
 
@@ -140,13 +151,21 @@ def evaluate(
         # soft trailing stop on the Kijun close + hard stop at the opposite Kumo edge
         long_should_exit = close < state.kijun or close < state.cloud_bottom
         short_should_exit = close > state.kijun or close > state.cloud_top
+    elif sc.exit_mode == "macd":
+        # momentum-fade exit on the underlying MACD histogram: exit a LONG the first
+        # time the (closed) histogram ticks DOWN vs the prior candle, a SHORT the
+        # first time it ticks UP. When the two histograms aren't available yet
+        # (warmup), hold — "else continue".
+        have = hist is not None and prev_hist is not None
+        long_should_exit = have and hist < prev_hist
+        short_should_exit = have and hist > prev_hist
     else:
         long_should_exit = long_exit(close, state)
         short_should_exit = short_exit(close, state)
 
     signal = "LONG" if long_ok else "SHORT" if short_ok else "NEUTRAL"
     return Eval(
-        ready=True, close=close, state=state, macd_hist=hist,
+        ready=True, close=close, state=state, macd_hist=hist, prev_macd_hist=prev_hist,
         chikou_ok_long=chikou_ok_long, chikou_ok_short=chikou_ok_short,
         thickness=thickness, thickness_ok=thickness_ok,
         long_ok=long_ok, short_ok=short_ok,

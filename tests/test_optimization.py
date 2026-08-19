@@ -62,9 +62,32 @@ def test_kijun_exit_ignores_tenkan_only_breach():
     assert ev_kij.long_should_exit is False   # kijun mode: still above kijun -> hold
 
 
+def test_macd_slope_exit():
+    # exit_mode 'macd': LONG exits when the histogram ticks down, SHORT when it ticks up.
+    P2 = IchimokuParams(tenkan=3, kijun=9, senkou_b=12, displacement=3)
+    sc = StrategyConfig(ich=P2, exit_mode="macd")
+
+    # accelerating up then a down-tick on the last candle -> histogram falls -> LONG exits
+    closes = [100.0 + i * i * 0.1 for i in range(40)]
+    closes_falloff = closes[:-1] + [closes[-2] - 5]  # last candle dips
+    highs = [c + 0.5 for c in closes_falloff]
+    lows = [c - 0.5 for c in closes_falloff]
+    ev = evaluate(highs, lows, closes_falloff, sc)
+    assert ev.macd_hist is not None and ev.prev_macd_hist is not None
+    assert (ev.macd_hist < ev.prev_macd_hist) == ev.long_should_exit
+    assert ev.long_should_exit is True     # histogram fell -> exit a long
+
+    # still-accelerating up: histogram rising -> LONG holds, SHORT would exit
+    ev2 = evaluate([c + 0.5 for c in closes], [c - 0.5 for c in closes], closes, sc)
+    assert ev2.macd_hist > ev2.prev_macd_hist
+    assert ev2.long_should_exit is False   # rising momentum -> hold the long
+    assert ev2.short_should_exit is True   # rising -> a short should bail
+
+
 def _eval(**kw):
     base = dict(
         ready=True, close=100.0, state=IchimokuState(1, 1, 1, 1), macd_hist=None,
+        prev_macd_hist=None,
         chikou_ok_long=True, chikou_ok_short=True, thickness=1.0, thickness_ok=True,
         long_ok=False, short_ok=False, long_should_exit=False, short_should_exit=False,
         signal="NEUTRAL",

@@ -50,11 +50,14 @@ strategy:
   # with `min_cloud_thickness:` (an index without an override inherits this).
   min_cloud_thickness: 5
 
-  # --- Exit restructuring (optimization: fewer whipsaw exits) ---
+  # --- Exit restructuring ---
+  # 'macd'      = momentum fade on the underlying MACD histogram: exit a LONG the
+  #               first time the current (closed) histogram is LESS than the prior
+  #               candle's; exit a SHORT the first time it is GREATER. Else hold.
   # 'kijun'     = soft trailing stop on a Kijun close + hard stop at the opposite
   #               Kumo edge (Span B for longs / Span A for shorts).
   # 'any_level' = original: exit on a close past ANY of the four lines.
-  exit_mode: kijun
+  exit_mode: macd
   # Book this fraction of the position once the OPTION premium gains this %.
   # Needs >= 2 lots to split (a single lot can't be halved). 0 disables.
   partial_target_pct: 15

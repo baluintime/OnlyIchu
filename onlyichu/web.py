@@ -16,7 +16,9 @@ import threading
 import time as _time
 from datetime import datetime, timedelta
 
-from flask import Flask, jsonify, render_template, request, send_file
+import io
+
+from flask import Flask, Response, jsonify, render_template, request, send_file
 
 from . import auth
 from . import settings as settings_mod
@@ -166,6 +168,64 @@ class DashboardService:
         last_ts = candles[-1].ts if candles else None
         candles.extend(c for c in intraday if last_ts is None or c.ts > last_ts)
         return candles
+
+    # ------------------------------------------------------- validation dump
+
+    VALIDATION_COLUMNS = [
+        "index", "timeframe", "time", "open", "high", "low", "close",
+        "tenkan", "kijun", "span_a", "span_b", "cloud_top", "cloud_bottom",
+        "thickness", "thickness_ok", "macd_hist", "prev_macd_hist",
+        "chikou_ok_long", "chikou_ok_short",
+        "long_ok", "short_ok", "long_should_exit", "short_should_exit", "signal",
+    ]
+
+    def validation_rows(self, max_per_pipeline: int = 400) -> list[dict]:
+        """Every computed indicator/rule value, per candle, for the 1m and 5m
+        pipelines of every index — so the logic can be validated against an
+        external chart. Last `max_per_pipeline` ready candles per pipeline."""
+        out: list[dict] = []
+        for index in self.cfg.enabled_instruments:
+            sc = self._sc_by_key.get(index.key, self.sc)
+            try:
+                one_min = self._index_candles(index)
+            except Exception as exc:  # noqa: BLE001 - skip an index that won't load
+                log.warning("validation: candles failed for %s: %s", index.name, exc)
+                continue
+            for tf in self.cfg.timeframes_minutes:
+                if tf == 1:
+                    series = one_min
+                else:
+                    agg = TimeframeAggregator(tf)
+                    series = [done for c in one_min if (done := agg.feed(c))]
+                highs = [c.high for c in series]
+                lows = [c.low for c in series]
+                closes = [c.close for c in series]
+                first = max(sc.min_candles - 1, 0)
+                start = max(first, len(series) - max_per_pipeline)
+                for i in range(start, len(series)):
+                    ev = evaluate(highs, lows, closes, sc, index=i)
+                    if ev is None:
+                        continue
+                    c, s = series[i], ev.state
+                    out.append({
+                        "index": index.name, "timeframe": f"{tf}m",
+                        "time": c.ts.isoformat(),
+                        "open": f"{c.open:.2f}", "high": f"{c.high:.2f}",
+                        "low": f"{c.low:.2f}", "close": f"{c.close:.2f}",
+                        "tenkan": f"{s.tenkan:.2f}", "kijun": f"{s.kijun:.2f}",
+                        "span_a": f"{s.span_a:.2f}", "span_b": f"{s.span_b:.2f}",
+                        "cloud_top": f"{s.cloud_top:.2f}", "cloud_bottom": f"{s.cloud_bottom:.2f}",
+                        "thickness": f"{ev.thickness:.2f}" if ev.thickness is not None else "",
+                        "thickness_ok": ev.thickness_ok,
+                        "macd_hist": f"{ev.macd_hist:.4f}" if ev.macd_hist is not None else "",
+                        "prev_macd_hist": f"{ev.prev_macd_hist:.4f}" if ev.prev_macd_hist is not None else "",
+                        "chikou_ok_long": ev.chikou_ok_long, "chikou_ok_short": ev.chikou_ok_short,
+                        "long_ok": ev.long_ok, "short_ok": ev.short_ok,
+                        "long_should_exit": ev.long_should_exit,
+                        "short_should_exit": ev.short_should_exit,
+                        "signal": ev.signal,
+                    })
+        return out
 
     # ---------------------------------------------------------- payload
 
@@ -346,6 +406,43 @@ def read_trade_log(path: str, limit: int = 200) -> list[dict]:
         log.warning("could not read trade log %s: %s", path, exc)
         return []
     return rows[-limit:][::-1]
+
+
+def purge_trade_log(path: str, days: int) -> int:
+    """Delete trade-log rows older than `days` days (by the row's time column),
+    rewriting the file in place. Header and unparseable/recent rows are kept.
+    Returns the number of rows removed."""
+    if not os.path.exists(path) or days <= 0:
+        return 0
+    try:
+        with open(path, newline="", encoding="utf-8") as fh:
+            table = list(csv.reader(fh))
+    except (OSError, csv.Error) as exc:
+        log.warning("could not read trade log %s for purge: %s", path, exc)
+        return 0
+    if len(table) <= 1:
+        return 0
+    header, rows = table[0], table[1:]
+    cutoff = datetime.now() - timedelta(days=days)
+    kept, removed = [], 0
+    for r in rows:
+        if not r:
+            continue
+        try:
+            ts = datetime.fromisoformat(r[0])
+        except (ValueError, IndexError):
+            kept.append(r)  # can't date it — keep it rather than lose data
+            continue
+        if ts >= cutoff:
+            kept.append(r)
+        else:
+            removed += 1
+    if removed:
+        with open(path, "w", newline="", encoding="utf-8") as fh:
+            writer = csv.writer(fh)
+            writer.writerow(header)
+            writer.writerows(kept)
+    return removed
 
 
 class TradingController:
@@ -737,6 +834,49 @@ def create_app(cfg: Config, api: UpstoxAPI, token: str | None = None) -> Flask:
             as_attachment=True,
             download_name=f"onlyichu_trades_{mode}_{datetime.now().strftime('%Y%m%d')}.csv",
             mimetype="text/csv",
+        )
+
+    @app.post("/api/trades/purge")
+    def trades_purge():  # type: ignore[unused-variable]
+        body = request.get_json(silent=True) or {}
+        mode = str(body.get("mode", "both")).lower()
+        try:
+            days = int(body.get("days", 5))
+        except (TypeError, ValueError):
+            return jsonify({"ok": False, "message": "days must be an integer"}), 400
+        if days < 1:
+            return jsonify({"ok": False, "message": "days must be >= 1"}), 400
+        targets = []
+        if mode in ("paper", "both"):
+            targets.append(("paper", cfg.paper_trade_log))
+        if mode in ("live", "both"):
+            targets.append(("live", cfg.live_trade_log))
+        if not targets:
+            return jsonify({"ok": False, "message": f"unknown mode {mode!r}"}), 400
+        removed = {name: purge_trade_log(path, days) for name, path in targets}
+        service._cached = None
+        total = sum(removed.values())
+        return jsonify({
+            "ok": True, "removed": removed, "total": total,
+            "message": f"removed {total} trade log row(s) older than {days} day(s)",
+        })
+
+    @app.get("/validate.csv")
+    def validate_csv():  # type: ignore[unused-variable]
+        if not api.has_token:
+            return jsonify({"ok": False, "message": "connect Upstox first"}), 400
+        rows = service.validation_rows()
+        buf = io.StringIO()
+        writer = csv.DictWriter(buf, fieldnames=DashboardService.VALIDATION_COLUMNS)
+        writer.writeheader()
+        writer.writerows(rows)
+        return Response(
+            buf.getvalue(),
+            mimetype="text/csv",
+            headers={
+                "Content-Disposition":
+                    f'attachment; filename=onlyichu_validation_{datetime.now().strftime("%Y%m%d_%H%M")}.csv'
+            },
         )
 
     @app.post("/api/trading/start")

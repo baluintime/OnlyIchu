@@ -294,3 +294,53 @@ def test_trade_log_endpoints(tmp_path):
 
     assert client.get("/api/trades?mode=live").get_json()["trades"] == []
     assert client.get("/trades.csv?mode=live").status_code == 404
+
+
+def test_trades_purge_removes_old_rows(tmp_path):
+    import csv
+    from datetime import datetime, timedelta
+
+    cfg = make_cfg(tmp_path)
+    cfg.paper_trade_log = str(tmp_path / "trades_paper.csv")
+    old = (datetime.now() - timedelta(days=10)).isoformat(timespec="seconds")
+    recent = (datetime.now() - timedelta(days=1)).isoformat(timespec="seconds")
+    with open(cfg.paper_trade_log, "w", newline="") as fh:
+        w = csv.writer(fh)
+        w.writerow(["time", "pipeline", "action", "symbol", "instrument_key",
+                    "direction", "qty", "price", "index_price", "pnl", "charges"])
+        w.writerow([old, "NIFTY:1m", "ENTRY", "X", "k", "LONG", 75, "100.00", "", "0.00", "0.00"])
+        w.writerow([recent, "NIFTY:1m", "EXIT", "X", "k", "LONG", 75, "110.00", "", "750.00", "20.00"])
+
+    app = create_app(cfg, FakeAPI())
+    client = app.test_client()
+    resp = client.post("/api/trades/purge", json={"mode": "paper", "days": 5})
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body["ok"] is True and body["removed"]["paper"] == 1
+    # only the recent row remains
+    trades = client.get("/api/trades?mode=paper").get_json()["trades"]
+    assert len(trades) == 1 and trades[0]["action"] == "EXIT"
+
+    # validation
+    assert client.post("/api/trades/purge", json={"days": 0}).status_code == 400
+
+
+def test_validation_export(tmp_path):
+    app = create_app(make_cfg(tmp_path), FakeAPI())
+    client = app.test_client()
+    resp = client.get("/validate.csv")
+    assert resp.status_code == 200
+    assert "attachment" in resp.headers.get("Content-Disposition", "")
+    text = resp.data.decode()
+    header = text.splitlines()[0]
+    for col in ("index", "timeframe", "close", "tenkan", "macd_hist",
+                "prev_macd_hist", "long_should_exit", "signal"):
+        assert col in header
+    assert "FAKE" in text            # rows for the configured index
+    assert ",1m," in text            # 1m pipeline captured (5m needs more warmup)
+
+
+def test_validation_export_requires_token(tmp_path):
+    app = create_app(make_cfg(tmp_path), FakeAPI(token=None))
+    client = app.test_client()
+    assert client.get("/validate.csv").status_code == 400

@@ -467,13 +467,15 @@
         <button class="segbtn" data-log="live">LIVE</button>
       </div>
       <a class="btn" id="btnDownload" href="/trades.csv?mode=paper">⬇ DOWNLOAD CSV</a>
+      <a class="btn" id="btnValidate" href="/validate.csv" title="One-time export of every computed Ichimoku/MACD value for the 1m and 5m pipelines, to validate the logic against a chart">⬇ EXPORT VALIDATION</a>
+      <button class="btn" id="btnPurge" title="Delete trade-log rows older than 5 days (paper + live)">🗑 CLEAR &gt;5d</button>
       <span class="tlog-count" id="tlogCount"></span>
     </div>
     <div class="tlog-wrap">
       <table>
         <thead><tr>
           <th>Time</th><th>Pipeline</th><th>Action</th><th>Symbol</th>
-          <th>Dir</th><th>Qty</th><th>Price</th><th>Index</th><th>PnL ₹</th>
+          <th>Dir</th><th>Qty</th><th>Price</th><th>Index</th><th>PnL ₹</th><th>Charges ₹</th>
         </tr></thead>
         <tbody id="tlogBody"></tbody>
       </table>
@@ -1030,6 +1032,20 @@ document.querySelectorAll("#segLog .segbtn").forEach((b) => {
   });
 });
 
+$("btnPurge").addEventListener("click", async () => {
+  if (!confirm("Delete trade-log rows older than 5 days (paper + live)? This cannot be undone.")) return;
+  try {
+    const resp = await fetch("/api/trades/purge", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mode: "both", days: 5 }),
+    });
+    const data = await resp.json();
+    alert(data.message || (data.ok ? "done" : "failed"));
+    lastTradeKey[logMode] = "";
+    loadTrades();
+  } catch (e) { alert("purge failed — try again"); }
+});
+
 async function loadTrades() {
   try {
     const resp = await fetch("/api/trades?mode=" + logMode, { cache: "no-store" });
@@ -1059,7 +1075,8 @@ async function loadTrades() {
         <td>${t.price ? fmt.format(parseFloat(t.price)) : ""}</td>
         <td>${t.index_price ? fmt.format(parseFloat(t.index_price)) : "—"}</td>
         <td class="${isEntry ? "" : pnl > 0 ? "pnl-pos" : pnl < 0 ? "pnl-neg" : ""}">
-          ${isEntry ? "—" : (pnl >= 0 ? "+" : "") + fmt.format(pnl)}</td>`;
+          ${isEntry ? "—" : (pnl >= 0 ? "+" : "") + fmt.format(pnl)}</td>
+        <td>${t.charges && parseFloat(t.charges) > 0 ? "-" + fmt.format(parseFloat(t.charges)) : "—"}</td>`;
       body.appendChild(tr);
     });
     lastTradeKey[logMode] = newestKey;

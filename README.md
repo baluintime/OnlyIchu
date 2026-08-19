@@ -24,10 +24,13 @@ Implements the multi-timeframe execution protocol from
   the hundreds, MIDCPNIFTY in the tens), so set `min_cloud_thickness:` on each
   instrument in `config.yaml`; an index without one inherits the global
   `strategy.min_cloud_thickness`.
-- **Tiered exit** (`exit_mode: kijun`): soft trailing stop on a **Kijun close**
-  plus a hard stop at the **opposite Kumo edge** — instead of exiting on any single
-  line, which whipsaws on fast timeframes. Set `exit_mode: any_level` for the
-  original rule.
+- **Exit mode** (`exit_mode`, default `macd`):
+  - `macd` — **MACD-histogram momentum fade** on the underlying index: exit a
+    LONG the first time the current (closed) histogram is **less** than the prior
+    candle's, a SHORT the first time it is **greater**; otherwise hold.
+  - `kijun` — soft trailing stop on a **Kijun close** plus a hard stop at the
+    **opposite Kumo edge** (instead of exiting on any single line).
+  - `any_level` — original: exit on a close past any one of the four lines.
 - **Partial profit-taking**: book `partial_exit_fraction` (50%) of the position
   once the option premium gains `partial_target_pct` (15%); needs ≥2 lots.
 - **Option selection**: delta **0.65–0.75** (target 0.70) from the Upstox option
@@ -215,7 +218,17 @@ inputs with an APPLY button. Lots-per-trade takes effect on the next entry
 **Trade log:** a table at the bottom of the page shows every executed trade
 (newest first) with PAPER | LIVE tabs, auto-refreshing with the dashboard, and
 a DOWNLOAD CSV button that serves the full log as a file
-(`GET /trades.csv?mode=paper|live`).
+(`GET /trades.csv?mode=paper|live`). Each row shows the fill price, index level,
+net PnL and the charges deducted. **CLEAR >5d** deletes trade-log rows older than
+five days from both logs (`POST /api/trades/purge`, body `{mode, days}`). If the
+table looks empty, check the other tab — paper and live trades are kept
+separately, so a LIVE run leaves the PAPER tab empty and vice-versa.
+
+**Validation export:** **EXPORT VALIDATION** (`GET /validate.csv`) is a one-time
+download of every computed value — Tenkan, Kijun, Span A/B, cloud edges, cloud
+thickness, current and previous MACD histogram, Chikou checks, and the resulting
+entry/exit booleans and signal — for the **1m and 5m** pipelines of every index,
+per candle. Use it to reconcile the engine's numbers against your charting tool.
 
 **Paper/live switching from the page:** the *Trading engine* bar has a
 PAPER | LIVE toggle plus START/STOP and SQUARE OFF ALL buttons. START in paper
