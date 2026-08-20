@@ -296,6 +296,50 @@ def test_trade_log_endpoints(tmp_path):
     assert client.get("/trades.csv?mode=live").status_code == 404
 
 
+def test_legacy_log_without_charges_column_is_json_safe(tmp_path):
+    # a log written with the OLD 10-column header but 11-value rows must not
+    # crash jsonify (the overflow landed under a None key -> sort compared None<str)
+    import csv
+
+    cfg = make_cfg(tmp_path)
+    cfg.paper_trade_log = str(tmp_path / "trades_paper.csv")
+    with open(cfg.paper_trade_log, "w", newline="") as fh:
+        w = csv.writer(fh)
+        w.writerow(["time", "pipeline", "action", "symbol", "instrument_key",
+                    "direction", "qty", "price", "index_price", "pnl"])  # 10 cols
+        w.writerow(["2026-08-11T09:21:02", "NIFTY:1m", "ENTRY", "X", "k",
+                    "SHORT", 65, "287.70", "24496.70", "0.00", "20.00"])  # 11 values
+
+    app = create_app(cfg, FakeAPI())
+    client = app.test_client()
+    resp = client.get("/api/trades?mode=paper")
+    assert resp.status_code == 200
+    trades = resp.get_json()["trades"]
+    assert len(trades) == 1 and trades[0]["pipeline"] == "NIFTY:1m"
+
+
+def test_log_header_migrates_on_next_write(tmp_path):
+    import csv
+
+    from onlyichu.broker import PaperBroker
+
+    cfg = make_cfg(tmp_path)
+    cfg.paper_trade_log = str(tmp_path / "trades_paper.csv")
+    with open(cfg.paper_trade_log, "w", newline="") as fh:
+        w = csv.writer(fh)
+        w.writerow(["time", "pipeline", "action", "symbol", "instrument_key",
+                    "direction", "qty", "price", "index_price", "pnl"])  # legacy 10-col
+        w.writerow(["2026-08-11T09:21:02", "NIFTY:1m", "ENTRY", "X", "k",
+                    "SHORT", 65, "287.70", "24496.70", "0.00"])
+
+    broker = PaperBroker(cfg, None)
+    broker.enter("NIFTY:5m", "NSE_FO|1", "NIFTY CE", 75, "LONG", 100.0)  # triggers a write
+    with open(cfg.paper_trade_log, newline="") as fh:
+        table = list(csv.reader(fh))
+    assert table[0][-1] == "charges"        # header upgraded
+    assert all(len(r) == len(table[0]) for r in table[1:])  # every row aligned
+
+
 def test_trades_purge_removes_old_rows(tmp_path):
     import csv
     from datetime import datetime, timedelta

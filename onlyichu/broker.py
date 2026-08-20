@@ -342,18 +342,49 @@ class BaseBroker:
             self.state.realized_pnl_today = 0.0
             self.state.charges_today = 0.0
 
+    TRADE_LOG_HEADER = [
+        "time", "pipeline", "action", "symbol", "instrument_key",
+        "direction", "qty", "price", "index_price", "pnl", "charges",
+    ]
+
+    def _migrate_log_header(self) -> None:
+        """Upgrade a legacy trade log written before a column was added (e.g.
+        `charges`), so appended rows don't misalign with the header. Rewrites the
+        file once, padding/truncating existing rows to the current column set."""
+        path = self.trade_log_path
+        if not os.path.exists(path):
+            return
+        try:
+            with open(path, newline="", encoding="utf-8") as fh:
+                first = fh.readline()
+            if not first.strip():
+                return
+            current = next(csv.reader([first]))
+            if current == self.TRADE_LOG_HEADER:
+                return
+            with open(path, newline="", encoding="utf-8") as fh:
+                table = list(csv.reader(fh))
+        except (OSError, csv.Error, StopIteration) as exc:
+            log.warning("could not migrate trade log header %s: %s", path, exc)
+            return
+        width = len(self.TRADE_LOG_HEADER)
+        fixed = [(r + [""] * width)[:width] for r in table[1:] if r]
+        with open(path, "w", newline="", encoding="utf-8") as fh:
+            writer = csv.writer(fh)
+            writer.writerow(self.TRADE_LOG_HEADER)
+            writer.writerows(fixed)
+
     def _log_trade(
         self, action: str, pos: Position, price: float, pnl: float,
         index_price: float | None = None, charges: float = 0.0,
     ) -> None:
         new_file = not os.path.exists(self.trade_log_path)
+        if not new_file:
+            self._migrate_log_header()
         with open(self.trade_log_path, "a", newline="", encoding="utf-8") as fh:
             writer = csv.writer(fh)
             if new_file:
-                writer.writerow(
-                    ["time", "pipeline", "action", "symbol", "instrument_key",
-                     "direction", "qty", "price", "index_price", "pnl", "charges"]
-                )
+                writer.writerow(self.TRADE_LOG_HEADER)
             writer.writerow(
                 [datetime.now().isoformat(timespec="seconds"), pos.pipeline_id, action,
                  pos.symbol, pos.instrument_key, pos.direction, pos.qty,

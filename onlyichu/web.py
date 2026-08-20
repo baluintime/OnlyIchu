@@ -405,6 +405,10 @@ def read_trade_log(path: str, limit: int = 200) -> list[dict]:
     except (OSError, csv.Error) as exc:
         log.warning("could not read trade log %s: %s", path, exc)
         return []
+    # A row wider than the header lands its overflow under a None key (legacy
+    # logs written before a column was added). Drop it so it stays JSON-safe.
+    for r in rows:
+        r.pop(None, None)
     return rows[-limit:][::-1]
 
 
