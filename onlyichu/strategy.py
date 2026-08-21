@@ -179,19 +179,27 @@ def evaluate(
 
 
 def decide_eval(ev: Eval, position_side: str | None) -> list[str]:
-    """Turn an Eval + held side into ordered actions (EXIT before a reversal)."""
+    """Turn an Eval + held side into ordered actions (EXIT before a reversal).
+
+    A position that exits on a candle is NOT re-entered on the SAME side on that
+    same candle — otherwise, when the exit rule (e.g. a MACD-slope tick) and the
+    breakout entry rule disagree on one close, the pipeline would exit and
+    immediately re-open the identical trade, churning loss + charges. A genuine
+    reversal (exit LONG → enter SHORT, or vice-versa) on the same candle is still
+    allowed."""
     actions: list[str] = []
     side = position_side
+    exited: str | None = None
     if side == "LONG" and ev.long_should_exit:
         actions.append(EXIT)
-        side = None
+        exited, side = "LONG", None
     elif side == "SHORT" and ev.short_should_exit:
         actions.append(EXIT)
-        side = None
+        exited, side = "SHORT", None
     if side is None:
-        if ev.long_ok:
+        if ev.long_ok and exited != "LONG":
             actions.append(ENTER_LONG)
-        elif ev.short_ok:
+        elif ev.short_ok and exited != "SHORT":
             actions.append(ENTER_SHORT)
     return actions
 

@@ -38,6 +38,12 @@ Implements the multi-timeframe execution protocol from
   - `kijun` — soft trailing stop on a **Kijun close** plus a hard stop at the
     **opposite Kumo edge** (instead of exiting on any single line).
   - `any_level` — original: exit on a close past any one of the four lines.
+
+  A position that exits on a candle is never re-opened on the **same side on that
+  same candle** (which would happen when the exit rule and the breakout entry
+  disagree on one close — e.g. MACD ticks against a still-valid breakout). It
+  goes flat instead; a genuine reversal to the opposite side on that candle is
+  still taken.
 - **Partial profit-taking**: book `partial_exit_fraction` (50%) of the position
   once the option premium gains `partial_target_pct` (15%); needs ≥2 lots.
 - **Option selection**: delta **0.65–0.75** (target 0.70) from the Upstox option

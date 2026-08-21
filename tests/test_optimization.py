@@ -105,6 +105,17 @@ def test_decide_eval_entry_exit_reversal():
     assert decide_eval(_eval(long_should_exit=True, short_ok=True), "LONG") == [EXIT, ENTER_SHORT]
 
 
+def test_decide_eval_no_same_side_reentry_on_one_candle():
+    # exit a SHORT while the breakout still says short -> EXIT only, no re-entry
+    assert decide_eval(_eval(short_should_exit=True, short_ok=True), "SHORT") == [EXIT]
+    # same for a LONG
+    assert decide_eval(_eval(long_should_exit=True, long_ok=True), "LONG") == [EXIT]
+    # but a real reversal on the same candle is still allowed
+    assert decide_eval(_eval(short_should_exit=True, long_ok=True), "SHORT") == [EXIT, ENTER_LONG]
+    # and after being flat next candle, re-entry works normally
+    assert decide_eval(_eval(short_ok=True), None) == [ENTER_SHORT]
+
+
 def test_build_strategy_config_per_index_thickness_override():
     from onlyichu.config import Config, IndexConfig
     from onlyichu.strategy import build_strategy_config
