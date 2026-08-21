@@ -77,6 +77,21 @@ def test_trade_log_records_index_price(tmp_path):
     assert broker.position("MIDCPNIFTY:1m") is None  # closed
 
 
+def test_trade_log_records_candle_time(tmp_path):
+    import csv
+
+    cfg = make_cfg(tmp_path)
+    api = FakeAPI({"NSE_FO|1": 100.0})
+    broker = PaperBroker(cfg, api)
+    broker.enter("NIFTY:5m", "NSE_FO|1", "NIFTY CE", 75, "LONG", None,
+                 candle_time="2026-08-21T09:40:00")
+    broker.exit("NIFTY:5m", price_hint=None, candle_time="2026-08-21T09:45:00")
+    with open(cfg.paper_trade_log, newline="") as fh:
+        rows = list(csv.DictReader(fh))
+    assert rows[0]["action"] == "ENTRY" and rows[0]["candle_time"] == "2026-08-21T09:40:00"
+    assert rows[1]["action"].startswith("EXIT") and rows[1]["candle_time"] == "2026-08-21T09:45:00"
+
+
 def test_paper_option_roundtrip(tmp_path):
     cfg = make_cfg(tmp_path)
     api = FakeAPI({"NSE_FO|123": 100.0})

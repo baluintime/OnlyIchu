@@ -489,7 +489,7 @@
     <div class="tlog-wrap">
       <table>
         <thead><tr>
-          <th>Time</th><th>Pipeline</th><th>Action</th><th>Symbol</th>
+          <th>Time</th><th>Candle close</th><th>Pipeline</th><th>Action</th><th>Symbol</th>
           <th>Dir</th><th>Qty</th><th>Price</th><th>Index</th><th>PnL ₹</th><th>Charges ₹</th>
         </tr></thead>
         <tbody id="tlogBody"></tbody>
@@ -1107,6 +1107,7 @@ async function loadTrades() {
       if (isNew && i === 0) tr.className = "fresh";
       tr.innerHTML = `
         <td>${(t.time || "").replace("T", " ")}</td>
+        <td>${t.candle_time ? t.candle_time.replace("T", " ") : "—"}</td>
         <td>${t.pipeline || ""}</td>
         <td class="act ${isEntry ? "ENTRY" : ""}">${t.action || ""}</td>
         <td>${t.symbol || ""}</td>

@@ -379,7 +379,8 @@ def test_log_header_migrates_on_next_write(tmp_path):
     broker.enter("NIFTY:5m", "NSE_FO|1", "NIFTY CE", 75, "LONG", 100.0)  # triggers a write
     with open(cfg.paper_trade_log, newline="") as fh:
         table = list(csv.reader(fh))
-    assert table[0][-1] == "charges"        # header upgraded
+    assert table[0][-1] == "candle_time"    # header upgraded to the current schema
+    assert "charges" in table[0]
     assert all(len(r) == len(table[0]) for r in table[1:])  # every row aligned
 
 

@@ -272,8 +272,13 @@ class Engine:
 
     def _execute(self, runner: IndexRunner, signal: Signal) -> None:
         pid = signal.pipeline_id
+        # the candle's interval-close time (ts is the interval start) — proves the
+        # decision was taken on a completed candle close, not a mid-candle tick
+        tf = int(pid.rsplit(":", 1)[1].rstrip("m"))
+        candle_close = (signal.candle.ts + timedelta(minutes=tf)).isoformat(timespec="seconds")
         if signal.action == EXIT:
-            self.broker.exit(pid, price_hint=None, note="signal", underlying_spot=signal.candle.close)
+            self.broker.exit(pid, price_hint=None, note="signal",
+                             underlying_spot=signal.candle.close, candle_time=candle_close)
             return
 
         # entries
@@ -334,6 +339,7 @@ class Engine:
         pos = self.broker.enter(
             pid, sel.instrument_key, sel.trading_symbol, qty, direction, sel.ltp,
             underlying_spot=spot, strike=sel.strike, lot_size=sel.lot_size,
+            candle_time=candle_close,
         )
         if pos is not None:
             self.trades_today[pid] = self.trades_today.get(pid, 0) + 1

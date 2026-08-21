@@ -110,6 +110,7 @@ class BaseBroker:
         underlying_spot: float | None = None,
         strike: float | None = None,
         lot_size: int | None = None,
+        candle_time: str | None = None,
     ) -> Position | None:
         if pipeline_id in self.state.positions:
             log.warning("%s already holds a position; entry skipped", pipeline_id)
@@ -130,7 +131,7 @@ class BaseBroker:
             lot_size=lot_size,
         )
         self.state.positions[pipeline_id] = pos
-        self._log_trade("ENTRY", pos, fill, 0.0, index_price=underlying_spot)
+        self._log_trade("ENTRY", pos, fill, 0.0, index_price=underlying_spot, candle_time=candle_time)
         log.info(
             "%s entered %s @ %.2f (index %s)", pipeline_id, pos.symbol, fill,
             f"{underlying_spot:.2f}" if underlying_spot is not None else "n/a",
@@ -144,6 +145,7 @@ class BaseBroker:
         price_hint: float | None,
         note: str = "",
         underlying_spot: float | None = None,
+        candle_time: str | None = None,
     ) -> float | None:
         pos = self.state.positions.get(pipeline_id)
         if pos is None:
@@ -171,7 +173,7 @@ class BaseBroker:
         del self.state.positions[pipeline_id]
         self._log_trade(
             f"EXIT{(' ' + note) if note else ''}", pos, fill, pnl,
-            index_price=underlying_spot, charges=charges,
+            index_price=underlying_spot, charges=charges, candle_time=candle_time,
         )
         self._persist()
         log.info(
@@ -344,7 +346,7 @@ class BaseBroker:
 
     TRADE_LOG_HEADER = [
         "time", "pipeline", "action", "symbol", "instrument_key",
-        "direction", "qty", "price", "index_price", "pnl", "charges",
+        "direction", "qty", "price", "index_price", "pnl", "charges", "candle_time",
     ]
 
     def _migrate_log_header(self) -> None:
@@ -376,7 +378,7 @@ class BaseBroker:
 
     def _log_trade(
         self, action: str, pos: Position, price: float, pnl: float,
-        index_price: float | None = None, charges: float = 0.0,
+        index_price: float | None = None, charges: float = 0.0, candle_time: str | None = None,
     ) -> None:
         new_file = not os.path.exists(self.trade_log_path)
         if not new_file:
@@ -389,7 +391,7 @@ class BaseBroker:
                 [datetime.now().isoformat(timespec="seconds"), pos.pipeline_id, action,
                  pos.symbol, pos.instrument_key, pos.direction, pos.qty,
                  f"{price:.2f}", f"{index_price:.2f}" if index_price is not None else "",
-                 f"{pnl:.2f}", f"{charges:.2f}"]
+                 f"{pnl:.2f}", f"{charges:.2f}", candle_time or ""]
             )
 
 

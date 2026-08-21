@@ -232,7 +232,11 @@ inputs with an APPLY button. Lots-per-trade takes effect on the next entry
 (newest first) with PAPER | LIVE tabs, auto-refreshing with the dashboard, and
 a DOWNLOAD CSV button that serves the full log as a file
 (`GET /trades.csv?mode=paper|live`). Each row shows the fill price, index level,
-net PnL and the charges deducted. **CLEAR >5d** deletes trade-log rows older than
+net PnL, the charges deducted, and the **candle close** the decision was taken on
+(a `candle_time` column) — signals are only ever evaluated on completed candle
+closes, so every entry/exit ties back to a specific 1m/5m close. (The `time`
+column is the wall-clock moment the order was processed, which for a 5m signal is
+~1 minute after the candle boundary.) **CLEAR >5d** deletes trade-log rows older than
 five days from both logs (`POST /api/trades/purge`, body `{mode, days}`). If the
 table looks empty, check the other tab — paper and live trades are kept
 separately, so a LIVE run leaves the PAPER tab empty and vice-versa.
