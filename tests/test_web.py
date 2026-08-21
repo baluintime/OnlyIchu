@@ -252,6 +252,49 @@ def test_index_trade_toggle(tmp_path):
     assert resp.status_code == 400
 
 
+def test_entry_filter_toggle(tmp_path):
+    import json
+
+    cfg = make_cfg(tmp_path)
+    cfg.use_macd_filter = cfg.use_chikou_filter = cfg.use_thickness_filter = False
+    app = create_app(cfg, FakeAPI())
+    client = app.test_client()
+
+    resp = client.post("/api/filters", json={"macd": True, "thickness": True})
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body["ok"] is True
+    assert body["filters"] == {"macd": True, "chikou": False, "thickness": True}
+    assert cfg.use_macd_filter is True and cfg.use_thickness_filter is True and cfg.use_chikou_filter is False
+
+    # persisted for next start
+    with open(tmp_path / "settings.json") as fh:
+        saved = json.load(fh)
+    assert saved["entry_filters"] == {"macd": True, "thickness": True}
+
+    # reflected in the dashboard payload
+    body2 = client.get("/api/dashboard").get_json()
+    assert body2["filters"] == {"macd": True, "chikou": False, "thickness": True}
+
+    # nothing specified -> 400
+    assert client.post("/api/filters", json={}).status_code == 400
+
+
+def test_apply_overrides_restores_filters(tmp_path):
+    import json
+
+    from onlyichu.settings import apply_overrides
+
+    cfg = make_cfg(tmp_path)
+    cfg.use_macd_filter = True
+    with open(tmp_path / "settings.json", "w") as fh:
+        json.dump({"entry_filters": {"macd": False, "chikou": True}}, fh)
+    apply_overrides(cfg)
+    assert cfg.use_macd_filter is False
+    assert cfg.use_chikou_filter is True
+    assert cfg.use_thickness_filter is False  # untouched
+
+
 def test_apply_overrides_restores_toggles(tmp_path):
     import json
 

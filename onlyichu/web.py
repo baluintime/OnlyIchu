@@ -120,6 +120,7 @@ class DashboardService:
         self.params = self.sc.ich
         # per-index StrategyConfig so the min_cloud_thickness gate matches each
         # index's point scale (the dashboard mirrors the engine's per-index sc)
+        self._build_sc = build_strategy_config
         self._sc_by_key = {
             ix.key: build_strategy_config(cfg, ix) for ix in cfg.instruments
         }
@@ -132,6 +133,14 @@ class DashboardService:
         # failing indices are paused for a while instead of retried every poll
         self.fail_cooldown = 300.0
         self._failed: dict[str, tuple[float, str]] = {}
+
+    def rebuild_strategy(self) -> None:
+        """Recompute the StrategyConfigs from cfg (after an entry-filter toggle)
+        so dashboard signals match the engine's, and drop the payload cache."""
+        self.sc = self._build_sc(self.cfg)
+        self.params = self.sc.ich
+        self._sc_by_key = {ix.key: self._build_sc(self.cfg, ix) for ix in self.cfg.instruments}
+        self._cached = None
 
     # ------------------------------------------------------------- data
 
@@ -341,6 +350,12 @@ class DashboardService:
             "strategy": {
                 "params": f"{self.params.tenkan}/{self.params.kijun}/{self.params.senkou_b} (disp {self.params.displacement})",
                 "timeframes": [f"{tf}m" for tf in self.cfg.timeframes_minutes],
+                "exit_mode": self.cfg.exit_mode,
+            },
+            "filters": {
+                "macd": self.cfg.use_macd_filter,
+                "chikou": self.cfg.use_chikou_filter,
+                "thickness": self.cfg.use_thickness_filter,
             },
             "error": error,
             "indices": indices_payload,
@@ -800,6 +815,43 @@ def create_app(cfg: Config, api: UpstoxAPI, token: str | None = None) -> Flask:
         settings_mod.save_overrides(cfg, lots=lots, capital=capital, profit_target=profit_target)
         service._cached = None  # bust cache so the strip updates immediately
         return jsonify({"ok": True, "message": "; ".join(messages) or "nothing to change"})
+
+    @app.post("/api/filters")
+    def api_filters():  # type: ignore[unused-variable]
+        """Toggle entry filters (MACD / Chikou / min-cloud-thickness). Entry always
+        requires the close beyond all four Ichimoku levels; these only add
+        confluence on top. The MACD-slope EXIT is unaffected."""
+        body = request.get_json(silent=True) or {}
+        field_map = {
+            "macd": "use_macd_filter",
+            "chikou": "use_chikou_filter",
+            "thickness": "use_thickness_filter",
+        }
+        changed = []
+        for key, attr in field_map.items():
+            if key in body:
+                val = bool(body[key])
+                setattr(cfg, attr, val)
+                engine = controller._engine
+                if controller.running and engine is not None:
+                    setattr(engine.cfg, attr, val)
+                settings_mod.save_overrides(cfg, entry_filter=(key, val))
+                changed.append(f"{key} {'ON' if val else 'OFF'}")
+        if not changed:
+            return jsonify({"ok": False, "message": "no filter specified"}), 400
+        service.rebuild_strategy()
+        engine = controller._engine
+        if controller.running and engine is not None:
+            engine.rebuild_strategy()
+        return jsonify({
+            "ok": True,
+            "message": "entry filters: " + ", ".join(changed),
+            "filters": {
+                "macd": cfg.use_macd_filter,
+                "chikou": cfg.use_chikou_filter,
+                "thickness": cfg.use_thickness_filter,
+            },
+        })
 
     @app.post("/api/index-toggle")
     def api_index_toggle():  # type: ignore[unused-variable]

@@ -39,6 +39,13 @@ def apply_overrides(cfg: Config) -> None:
         cfg.paper_starting_cash = float(data["capital"])
     if "daily_profit_target" in data:
         cfg.daily_profit_target = float(data["daily_profit_target"])
+    filters = data.get("entry_filters") or {}
+    if "macd" in filters:
+        cfg.use_macd_filter = bool(filters["macd"])
+    if "chikou" in filters:
+        cfg.use_chikou_filter = bool(filters["chikou"])
+    if "thickness" in filters:
+        cfg.use_thickness_filter = bool(filters["thickness"])
     toggles = data.get("trade_enabled") or {}
     for ix in cfg.instruments:
         if ix.name in toggles:
@@ -51,6 +58,7 @@ def save_overrides(
     capital: float | None = None,
     trade_toggle: tuple[str, bool] | None = None,
     profit_target: float | None = None,
+    entry_filter: tuple[str, bool] | None = None,
 ) -> None:
     path = settings_path(cfg)
     data: dict = {}
@@ -69,6 +77,9 @@ def save_overrides(
     if trade_toggle is not None:
         name, enabled = trade_toggle
         data.setdefault("trade_enabled", {})[name] = bool(enabled)
+    if entry_filter is not None:
+        name, enabled = entry_filter
+        data.setdefault("entry_filters", {})[name] = bool(enabled)
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     with open(path, "w", encoding="utf-8") as fh:
         json.dump(data, fh, indent=2)

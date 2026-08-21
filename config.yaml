@@ -35,19 +35,25 @@ strategy:
   senkou_b: 120
   displacement: 24
 
-  # --- Entry filters (optimization: reduce false breakouts) ---
+  # --- Entry filters (extra confluence ON TOP of the Ichimoku breakout) ---
+  # Entry ALWAYS requires the close beyond all four Ichimoku levels. These three
+  # optional filters add confluence and are OFF by default; each can be toggled
+  # live from the dashboard (persisted to state/settings.json).
   # Chikou span must be clear of price `chikou_period` candles ago.
-  use_chikou_filter: true
+  use_chikou_filter: false
   chikou_period: 26
   # MACD(fast,slow,signal) histogram must confirm direction (>0 long, <0 short).
-  use_macd_filter: true
+  # NOTE: this is the ENTRY filter only; the MACD-slope EXIT (exit_mode: macd)
+  # is independent and always active when selected.
+  use_macd_filter: false
   macd_fast: 12
   macd_slow: 26
   macd_signal: 9
-  # Refuse entries when the cloud is thinner than this many index points
-  # (low-volatility consolidation). 0 disables. This is the GLOBAL default; each
-  # index moves on a different point scale, so override it per instrument below
-  # with `min_cloud_thickness:` (an index without an override inherits this).
+  # Refuse entries when the cloud is thinner than min_cloud_thickness index points
+  # (low-volatility consolidation). use_thickness_filter turns the gate on/off;
+  # min_cloud_thickness is the GLOBAL default and each index can override it below
+  # (an index without an override inherits this).
+  use_thickness_filter: false
   min_cloud_thickness: 5
 
   # --- Exit restructuring ---

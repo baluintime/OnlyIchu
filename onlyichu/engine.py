@@ -97,6 +97,7 @@ class Engine:
         self._squared_off = False
         self._halted = False
         self._halt_reason = ""
+        self._filters_lock = threading.Lock()
         self._sync_ok = True
         self._position_mismatch: list[dict] = []
         # how many consecutive reconcile cycles each instrument has shown the same
@@ -109,6 +110,18 @@ class Engine:
 
     def _record_skip(self, pid: str, reason: str, direction: str | None = None) -> None:
         self.last_skips[pid] = {"reason": reason, "direction": direction, "at": _time.time()}
+
+    def rebuild_strategy(self) -> None:
+        """Re-derive the StrategyConfig from cfg and apply it to every pipeline,
+        so entry-filter toggles from the dashboard take effect on the running
+        engine without a restart (candle history is preserved)."""
+        with self._filters_lock:
+            self.sc = build_strategy_config(self.cfg)
+            self.params = self.sc.ich
+            for runner in self.runners:
+                sc = build_strategy_config(self.cfg, runner.index)
+                for pipeline in runner.pipelines.values():
+                    pipeline.sc = sc
 
     def recent_skips(self, ttl: float = 90.0) -> list[dict]:
         """Entry-skip notes from the last `ttl` seconds, for the dashboard."""

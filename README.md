@@ -17,12 +17,19 @@ Implements the multi-timeframe execution protocol from
 - **LONG**: close strictly above Tenkan, Kijun, Span A, Span B (and the whole cloud)
   → buy an **ITM Call** at the open of the next candle.
 - **SHORT**: close strictly below all levels → buy an **ITM Put** at the next open.
-- **Entry filters** (optional, on by default; reduce false breakouts in chop):
-  **Chikou span** clear of price N candles ago, **MACD(12,26,9) histogram**
-  confirming direction, and a **minimum cloud thickness** gate. The thickness
-  gate is **per index** — each index moves on its own point scale (BANKNIFTY in
-  the hundreds, MIDCPNIFTY in the tens), so set `min_cloud_thickness:` on each
-  instrument in `config.yaml`; an index without one inherits the global
+- **Entry filters** (optional confluence, **all OFF by default**): entry always
+  requires the close beyond all four Ichimoku levels; these only add extra
+  confirmation on top — **Chikou span** clear of price N candles ago,
+  **MACD(12,26,9) histogram** confirming direction, and a **minimum cloud
+  thickness** gate. Each is a **live toggle on the dashboard** (persisted to
+  `state/settings.json`) and also presettable in `config.yaml`
+  (`use_macd_filter`, `use_chikou_filter`, `use_thickness_filter`). With all off,
+  entry is the pure breakout. The MACD entry filter is separate from the
+  MACD-slope **exit** (`exit_mode: macd`), which stays active regardless. The
+  thickness gate is **per index** — each index moves on its own point scale
+  (BANKNIFTY in the hundreds, MIDCPNIFTY in the tens), so set
+  `min_cloud_thickness:` on each instrument in `config.yaml` (applied only when
+  `use_thickness_filter` is on); an index without one inherits the global
   `strategy.min_cloud_thickness`.
 - **Exit mode** (`exit_mode`, default `macd`):
   - `macd` — **MACD-histogram momentum fade** on the underlying index: exit a

@@ -36,7 +36,7 @@ def test_all_filters_pass_in_strong_uptrend():
 
 def test_thickness_filter_blocks_entry():
     highs, lows, closes = rising(40)
-    sc = StrategyConfig(ich=P, min_cloud_thickness=1e9)  # impossibly thick requirement
+    sc = StrategyConfig(ich=P, use_thickness=True, min_cloud_thickness=1e9)  # impossibly thick requirement
     ev = evaluate(highs, lows, closes, sc)
     assert ev.long_ok is False and ev.signal == "NEUTRAL"
     assert ev.thickness_ok is False
@@ -148,6 +148,14 @@ def test_config_yaml_parses_per_index_thickness(tmp_path):
     assert by_name["MIDCPNIFTY"].min_cloud_thickness is None  # inherits global
 
 
+def test_thickness_filter_off_ignores_thickness():
+    # with the thickness gate OFF, even an impossible floor doesn't block entry
+    highs, lows, closes = rising(40)
+    sc = StrategyConfig(ich=P, use_thickness=False, min_cloud_thickness=1e9)
+    ev = evaluate(highs, lows, closes, sc)
+    assert ev.thickness_ok is True and ev.signal == "LONG"
+
+
 def test_per_index_thickness_changes_signal():
     # same series, two indices: a thick-gate index blocks the entry the
     # loose-gate index takes
@@ -155,7 +163,7 @@ def test_per_index_thickness_changes_signal():
     ev0 = evaluate(highs, lows, closes, StrategyConfig(ich=P))
     thick = ev0.thickness
 
-    loose = StrategyConfig(ich=P, min_cloud_thickness=thick / 2)
-    strict = StrategyConfig(ich=P, min_cloud_thickness=thick * 2)
+    loose = StrategyConfig(ich=P, use_thickness=True, min_cloud_thickness=thick / 2)
+    strict = StrategyConfig(ich=P, use_thickness=True, min_cloud_thickness=thick * 2)
     assert evaluate(highs, lows, closes, loose).signal == "LONG"
     assert evaluate(highs, lows, closes, strict).signal == "NEUTRAL"

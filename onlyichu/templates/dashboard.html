@@ -118,6 +118,13 @@
   .ctrl-msg { width: 100%; font-size: 12px; color: var(--muted); display: none; }
   .ctrl-msg.show { display: block; }
   .ctrl-sep { width: 1px; height: 26px; background: var(--card-border); }
+  .ctrl-hint { font-size: 11px; color: var(--muted); }
+  .fswitch { display: inline-flex; align-items: center; gap: 7px; cursor: pointer; user-select: none;
+    padding: 5px 11px; border: 1px solid var(--card-border); border-radius: 8px; background: rgba(255,255,255,.02); transition: all .25s; }
+  .fswitch span { font-size: 10.5px; font-weight: 700; letter-spacing: 1px; color: var(--muted); transition: color .25s; }
+  .fswitch input { accent-color: var(--green); width: 15px; height: 15px; cursor: pointer; }
+  .fswitch:has(input:checked) { border-color: rgba(34,197,94,.55); background: rgba(34,197,94,.12); box-shadow: 0 0 12px rgba(34,197,94,.18); }
+  .fswitch:has(input:checked) span { color: var(--green); }
   .num { display: inline-flex; align-items: center; gap: 7px; }
   .num span { font-size: 10.5px; letter-spacing: 1px; color: var(--muted); }
   .num input {
@@ -429,6 +436,14 @@
     <button class="btn" id="btnApply">APPLY</button>
     <span class="engine-status" id="engineStatus"><span class="dot"></span><span id="engineText">ENGINE STOPPED</span></span>
     <div class="ctrl-msg" id="ctrlMsg"></div>
+  </div>
+
+  <div class="ctrl" id="filterBar">
+    <span class="ctrl-label" title="Entry always requires the close beyond all four Ichimoku levels. These add optional confluence and apply live. The MACD-slope EXIT is separate and always on.">Entry filters</span>
+    <label class="fswitch"><input type="checkbox" id="fMacd"><span>MACD</span></label>
+    <label class="fswitch"><input type="checkbox" id="fChikou"><span>CHIKOU</span></label>
+    <label class="fswitch"><input type="checkbox" id="fThick"><span>THICKNESS</span></label>
+    <span class="ctrl-hint" id="filterHint">All off = pure Ichimoku breakout. Exit: MACD slope.</span>
   </div>
 
   <div class="banner" id="syncBanner" style="display:none"></div>
@@ -1046,6 +1061,31 @@ $("btnPurge").addEventListener("click", async () => {
   } catch (e) { alert("purge failed — try again"); }
 });
 
+/* ---------- entry-filter toggles ---------- */
+const FILTER_SWITCHES = [["fMacd", "macd"], ["fChikou", "chikou"], ["fThick", "thickness"]];
+let filterBusy = false;
+function applyFilterState(f) {
+  if (!f) return;
+  $("fMacd").checked = !!f.macd;
+  $("fChikou").checked = !!f.chikou;
+  $("fThick").checked = !!f.thickness;
+}
+FILTER_SWITCHES.forEach(([id, key]) => {
+  $(id).addEventListener("change", async () => {
+    filterBusy = true;
+    try {
+      const resp = await fetch("/api/filters", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ [key]: $(id).checked }),
+      });
+      const data = await resp.json();
+      if (data.filters) applyFilterState(data.filters);
+      ctrlMsg(data.message || (data.ok ? "" : "filter update failed"), !data.ok);
+    } catch (e) { ctrlMsg("filter update failed — try again", true); }
+    filterBusy = false;
+  });
+});
+
 async function loadTrades() {
   try {
     const resp = await fetch("/api/trades?mode=" + logMode, { cache: "no-store" });
@@ -1095,7 +1135,10 @@ async function loadData() {
   pill.className = "pill " + (status === "OPEN" ? "open" : status === "PRE-OPEN" ? "preopen" : "closed");
 
   $("strategyMeta").textContent =
-    "Ichimoku " + data.strategy.params + " · " + data.strategy.timeframes.join(" & ") + " · updated " + data.generated_at;
+    "Ichimoku " + data.strategy.params + " · " + data.strategy.timeframes.join(" & ")
+    + " · exit " + (data.strategy.exit_mode || "").toUpperCase() + " · updated " + data.generated_at;
+
+  if (!filterBusy) applyFilterState(data.filters);
 
   renderAuth(data.auth);
 

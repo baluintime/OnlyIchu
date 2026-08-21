@@ -46,6 +46,7 @@ class StrategyConfig:
     macd_fast: int = 12
     macd_slow: int = 26
     macd_signal: int = 9
+    use_thickness: bool = False
     min_cloud_thickness: float = 0.0
     exit_mode: str = "any_level"  # 'any_level' (original) | 'kijun' (tiered) | 'macd' (momentum fade)
 
@@ -83,6 +84,7 @@ def build_strategy_config(cfg, index=None) -> StrategyConfig:
         macd_fast=cfg.macd_fast,
         macd_slow=cfg.macd_slow,
         macd_signal=cfg.macd_signal,
+        use_thickness=cfg.use_thickness_filter,
         min_cloud_thickness=thickness,
         exit_mode=cfg.exit_mode,
     )
@@ -140,7 +142,9 @@ def evaluate(
 
     # Minimum cloud thickness (low-volatility consolidation filter)
     thickness = abs(state.span_a - state.span_b)
-    thickness_ok = sc.min_cloud_thickness <= 0 or thickness >= sc.min_cloud_thickness
+    thickness_ok = (
+        not sc.use_thickness or sc.min_cloud_thickness <= 0 or thickness >= sc.min_cloud_thickness
+    )
 
     base_long = long_entry(close, state)
     base_short = short_entry(close, state)

@@ -53,6 +53,7 @@ class Config:
     macd_fast: int = 12
     macd_slow: int = 26
     macd_signal: int = 9
+    use_thickness_filter: bool = False  # gate entries on the min_cloud_thickness check
     min_cloud_thickness: float = 0.0  # reject when |SpanA-SpanB| < this (index points)
     # --- optimization: exit restructuring ---
     # 'kijun' = soft trailing stop on Kijun close + hard stop at the opposite Kumo edge;
@@ -153,6 +154,7 @@ def load_config(path: str = "config.yaml") -> Config:
     cfg.macd_fast = int(strat.get("macd_fast", cfg.macd_fast))
     cfg.macd_slow = int(strat.get("macd_slow", cfg.macd_slow))
     cfg.macd_signal = int(strat.get("macd_signal", cfg.macd_signal))
+    cfg.use_thickness_filter = bool(strat.get("use_thickness_filter", cfg.use_thickness_filter))
     cfg.min_cloud_thickness = float(strat.get("min_cloud_thickness", cfg.min_cloud_thickness))
     cfg.exit_mode = str(strat.get("exit_mode", cfg.exit_mode)).lower()
     cfg.partial_target_pct = float(strat.get("partial_target_pct", cfg.partial_target_pct))
