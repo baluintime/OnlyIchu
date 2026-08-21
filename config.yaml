@@ -4,8 +4,11 @@ mode: paper
 
 data:
   # Completed 1-minute candles are pulled from Upstox's intraday candle REST API,
-  # then aggregated into 5-minute candles locally.
-  poll_interval_seconds: 5
+  # then aggregated into 5-minute candles locally. The engine acts within one poll
+  # of a candle becoming available; 2s catches a just-finalized candle quickly.
+  # (Upstox itself finalizes a 1m candle ~20s after the minute — that broker-side
+  # lag is not something a faster poll can remove.)
+  poll_interval_seconds: 2
   # Days of historical 1m candles fetched at startup to warm up the indicators
   # (Ichimoku needs 52 + 26 = 78 completed candles per timeframe; 5m needs ~2 sessions).
   warmup_days: 7
