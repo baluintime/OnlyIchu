@@ -127,8 +127,12 @@ def evaluate(
         hist = macd_hist(closes[: i + 1], sc.macd_fast, sc.macd_slow, sc.macd_signal)
         if i >= 1:
             prev_hist = macd_hist(closes[:i], sc.macd_fast, sc.macd_slow, sc.macd_signal)
-    macd_ok_long = (not sc.use_macd) or (hist is not None and hist > 0)
-    macd_ok_short = (not sc.use_macd) or (hist is not None and hist < 0)
+    # MACD entry filter = histogram SLOPE (momentum building in the trade's
+    # direction): LONG needs the current histogram above the previous, SHORT below.
+    # If the previous histogram isn't available yet (warmup), block the entry.
+    macd_slope_ok = hist is not None and prev_hist is not None
+    macd_ok_long = (not sc.use_macd) or (macd_slope_ok and hist > prev_hist)
+    macd_ok_short = (not sc.use_macd) or (macd_slope_ok and hist < prev_hist)
 
     # Chikou span: current close vs the close `chikou_period` candles ago
     chikou_ok_long = chikou_ok_short = True

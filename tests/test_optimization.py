@@ -34,6 +34,28 @@ def test_all_filters_pass_in_strong_uptrend():
     assert ev.macd_hist is not None and ev.macd_hist > 0
 
 
+def test_macd_entry_requires_rising_histogram_for_long():
+    from onlyichu.ichimoku import long_entry
+
+    sc = StrategyConfig(ich=P, use_macd=True)
+    # accelerating uptrend -> histogram rising -> long allowed
+    highs, lows, closes = rising(40)
+    ev = evaluate(highs, lows, closes, sc)
+    assert ev.macd_hist is not None and ev.prev_macd_hist is not None
+    assert ev.macd_hist > ev.prev_macd_hist
+    assert ev.long_ok is True
+
+    # decelerating final candle: still above the whole cloud (breakout intact) but
+    # the histogram ticks DOWN -> the MACD entry filter blocks the long
+    closes2 = closes[:-1] + [closes[-2] + 0.01]
+    highs2 = [c + 0.5 for c in closes2]
+    lows2 = [c - 0.5 for c in closes2]
+    ev2 = evaluate(highs2, lows2, closes2, sc)
+    assert long_entry(ev2.close, ev2.state) is True     # breakout still valid
+    assert ev2.macd_hist < ev2.prev_macd_hist           # momentum faded
+    assert ev2.long_ok is False and ev2.signal == "NEUTRAL"
+
+
 def test_thickness_filter_blocks_entry():
     highs, lows, closes = rising(40)
     sc = StrategyConfig(ich=P, use_thickness=True, min_cloud_thickness=1e9)  # impossibly thick requirement

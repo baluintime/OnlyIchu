@@ -19,9 +19,10 @@ Implements the multi-timeframe execution protocol from
 - **SHORT**: close strictly below all levels → buy an **ITM Put** at the next open.
 - **Entry filters** (optional confluence, **all OFF by default**): entry always
   requires the close beyond all four Ichimoku levels; these only add extra
-  confirmation on top — **Chikou span** clear of price N candles ago,
-  **MACD(12,26,9) histogram** confirming direction, and a **minimum cloud
-  thickness** gate. Each is a **live toggle on the dashboard** (persisted to
+  confirmation on top — **Chikou span** clear of price N candles ago, a
+  **MACD(12,26,9) histogram slope** check (the current closed histogram must be
+  **rising** vs the previous candle for a LONG, **falling** for a SHORT — momentum
+  building in the trade's direction), and a **minimum cloud thickness** gate. Each is a **live toggle on the dashboard** (persisted to
   `state/settings.json`) and also presettable in `config.yaml`
   (`use_macd_filter`, `use_chikou_filter`, `use_thickness_filter`). With all off,
   entry is the pure breakout. The MACD entry filter is separate from the

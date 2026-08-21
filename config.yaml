@@ -45,10 +45,11 @@ strategy:
   # Chikou span must be clear of price `chikou_period` candles ago.
   use_chikou_filter: false
   chikou_period: 26
-  # MACD(fast,slow,signal) histogram must confirm direction (>0 long, <0 short).
-  # NOTE: this is the ENTRY filter only; the MACD-slope EXIT (exit_mode: macd)
-  # is independent and always active when selected.
-  use_macd_filter: false
+  # MACD(fast,slow,signal) histogram SLOPE must confirm momentum: for a LONG the
+  # current (closed) histogram must be GREATER than the previous candle's; for a
+  # SHORT it must be LESSER. This is the ENTRY filter only; the MACD-slope EXIT
+  # (exit_mode: macd) is independent and always active when selected.
+  use_macd_filter: true
   macd_fast: 12
   macd_slow: 26
   macd_signal: 9
