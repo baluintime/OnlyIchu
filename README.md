@@ -257,6 +257,31 @@ positions are left untouched), pick the other mode, and START again. The
 status pill shows which engine is running; the strip below mirrors the running
 engine's positions and realized PnL.
 
+### Span B strategy (experimental — separate page)
+
+A second, independent strategy lives at **`/spanb`** (linked from the main
+dashboard header). The original Ichimoku system is untouched and remains the
+default — this is an alternate approach you can run, compare, and revert away
+from freely.
+
+**Logic:** it trades purely off the slope of the **Senkou Span B** line:
+
+- **Span B falling** (current close's Span B < the previous candle's) → **sell an
+  out-of-the-money Call** (short premium).
+- **Span B rising** → **sell an out-of-the-money Put**.
+- **Exit when the slope reverts** (a short call is bought back once Span B turns
+  up again; a short put once it turns down). A flat Span B holds.
+
+Entries are **sold to open** (premium collected) and **bought to close** — the
+broker supports written/short options with sign-aware P&L
+(`(entry − exit) × qty`). The strike is `spanb.otm_strikes` (default **5**)
+strikes out of the money, chosen from the liquid strikes on the nearest expiry.
+Both the **1m and 5m** pipelines run per index.
+
+It has its **own engine, paper state and trade logs** (files suffixed `_spanb`),
+so it never collides with the Ichimoku engine — start/stop it with the PAPER |
+LIVE controls on the `/spanb` page. Tune it under `spanb:` in `config.yaml`.
+
 ### Other commands
 
 ```bash
@@ -285,6 +310,8 @@ onlyichu/
   candles.py     candle series + 1m→5m aggregation
   ichimoku.py    Ichimoku math + strict close-based entry/exit rules
   strategy.py    per-index/per-timeframe pipelines emitting signals
+  spanb.py       Span B slope strategy (separate page): sell OTM on the slope
+  spanb_engine.py  polling loop + short-option execution for the Span B strategy
   options.py     ITM strike selection by delta from the option chain
   broker.py      PaperBroker (simulated) and LiveBroker (real orders)
   engine.py      polling loop, session windows, risk guards, square-off

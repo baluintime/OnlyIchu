@@ -218,3 +218,66 @@ class OptionSelector:
             volume=volume,
             spread_pct=spread_pct,
         )
+
+    def select_otm(
+        self, underlying_key: str, option_type: str, spot: float, strikes_otm: int
+    ) -> OptionSelection | None:
+        """Pick an OUT-OF-THE-MONEY option `strikes_otm` strikes away from spot
+        (used by the Span B short-premium strategy). option_type 'CE' -> strike
+        above spot; 'PE' -> strike below spot. Considers only liquid strikes; if
+        the exact target is illiquid, falls back to the nearest liquid OTM strike.
+        Returns None (skip) if no liquid OTM strike exists."""
+        expiry = self.nearest_expiry(underlying_key)
+        if not expiry:
+            return None
+        opt_field = "call_options" if option_type == "CE" else "put_options"
+        try:
+            chain = self.api.option_chain(underlying_key, expiry)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("option chain fetch failed for %s %s: %s", underlying_key, expiry, exc)
+            return None
+        if not chain:
+            return None
+        lot = self.lot_size(underlying_key, expiry)
+
+        # gather liquid OTM strikes on the requested side, ordered by distance from spot
+        otm: list[tuple] = []  # (distance_rank_key, strike, leg, ltp, delta, oi, volume, spread_pct)
+        for row in chain:
+            strike = float(row.get("strike_price", 0) or 0)
+            leg = row.get(opt_field) or {}
+            if not leg.get("instrument_key"):
+                continue
+            is_otm = strike > spot if option_type == "CE" else strike < spot
+            if not is_otm:
+                continue
+            md = leg.get("market_data") or {}
+            ltp = self._num(md.get("ltp"))
+            ltp = ltp if ltp not in (None, 0) else None
+            delta = self._num((leg.get("option_greeks") or {}).get("delta"))
+            oi, volume, bid, ask, spread_pct = self._liquidity(md)
+            liquid, reason = self._is_liquid(oi, volume, bid, ask, spread_pct)
+            if not liquid:
+                log.debug("%s %s strike %.0f skipped (%s)", underlying_key, option_type, strike, reason)
+                continue
+            otm.append((abs(strike - spot), strike, leg, ltp, delta, oi, volume, spread_pct))
+
+        if not otm:
+            log.warning("%s %s: no liquid OTM strike found; entry skipped", underlying_key, option_type)
+            return None
+        # nearest OTM first; the Nth (1-based strikes_otm) is the target, clamped
+        otm.sort(key=lambda t: t[0])
+        idx = min(max(strikes_otm, 1) - 1, len(otm) - 1)
+        _, strike, leg, ltp, delta, oi, volume, spread_pct = otm[idx]
+        return OptionSelection(
+            instrument_key=leg["instrument_key"],
+            trading_symbol=leg.get("trading_symbol") or leg.get("tradingsymbol") or leg["instrument_key"],
+            strike=strike,
+            option_type=option_type,
+            expiry=expiry,
+            lot_size=lot,
+            ltp=ltp,
+            delta=delta,
+            oi=oi,
+            volume=volume,
+            spread_pct=spread_pct,
+        )

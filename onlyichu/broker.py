@@ -44,8 +44,12 @@ class Position:
     strike: float | None = None  # option strike price
     lot_size: int | None = None  # exchange lot size (for whole-lot partial exits)
     partial_taken: bool = False  # a partial profit exit has already fired
+    short: bool = False          # True = written option (sold to open, bought to close)
 
     def pnl(self, exit_price: float) -> float:
+        # long option: (exit - entry) * qty; short (written): (entry - exit) * qty
+        if self.short:
+            return (self.entry_price - exit_price) * self.qty
         return (exit_price - self.entry_price) * self.qty
 
 
@@ -111,11 +115,18 @@ class BaseBroker:
         strike: float | None = None,
         lot_size: int | None = None,
         candle_time: str | None = None,
+        short: bool = False,
     ) -> Position | None:
         if pipeline_id in self.state.positions:
             log.warning("%s already holds a position; entry skipped", pipeline_id)
             return None
-        fill = self._fill_buy(pipeline_id, instrument_key, qty, price_hint)
+        if short:
+            # sell-to-open (write): price the SELL leg; collects premium
+            tmp = Position(pipeline_id, instrument_key, symbol, qty, 0.0,
+                           datetime.now().isoformat(timespec="seconds"), direction, short=True)
+            fill = self._fill_sell(tmp, price_hint)
+        else:
+            fill = self._fill_buy(pipeline_id, instrument_key, qty, price_hint)
         if fill is None:
             return None
         pos = Position(
@@ -129,9 +140,11 @@ class BaseBroker:
             entry_spot=underlying_spot,
             strike=strike,
             lot_size=lot_size,
+            short=short,
         )
         self.state.positions[pipeline_id] = pos
-        self._log_trade("ENTRY", pos, fill, 0.0, index_price=underlying_spot, candle_time=candle_time)
+        self._log_trade("ENTRY" + (" SHORT" if short else ""), pos, fill, 0.0,
+                        index_price=underlying_spot, candle_time=candle_time)
         log.info(
             "%s entered %s @ %.2f (index %s)", pipeline_id, pos.symbol, fill,
             f"{underlying_spot:.2f}" if underlying_spot is not None else "n/a",
@@ -150,11 +163,20 @@ class BaseBroker:
         pos = self.state.positions.get(pipeline_id)
         if pos is None:
             return None
-        fill = self._fill_sell(pos, price_hint)
+        if pos.short:
+            # buy-to-close a written option
+            fill = self._fill_buy(pos.pipeline_id, pos.instrument_key, pos.qty, price_hint)
+        else:
+            fill = self._fill_sell(pos, price_hint)
         if fill is None:
             return None
         gross = pos.pnl(fill)
-        charges = round_trip_charges(self.charges, pos.entry_price or 0.0, fill, pos.qty)
+        # round-trip charges: for a short the BUY leg is the exit fill and the SELL
+        # leg is the entry; for a long it's the reverse.
+        if pos.short:
+            charges = round_trip_charges(self.charges, fill, pos.entry_price or 0.0, pos.qty)
+        else:
+            charges = round_trip_charges(self.charges, pos.entry_price or 0.0, fill, pos.qty)
         # sanity guard: a non-positive entry price means the entry was never
         # priced (e.g. an adopted position with a missing avg) — its PnL is
         # meaningless, so record 0 rather than fabricate a huge number.
@@ -188,8 +210,8 @@ class BaseBroker:
         """Close a whole-lot portion (~`fraction`) of a position once, keeping the
         rest. No-op if it can't be split into lots (single lot) or already done."""
         pos = self.state.positions.get(pipeline_id)
-        if pos is None or pos.partial_taken or not pos.lot_size or fraction <= 0 or fraction >= 1:
-            return None
+        if pos is None or pos.short or pos.partial_taken or not pos.lot_size or fraction <= 0 or fraction >= 1:
+            return None  # short positions don't do partial profit-taking
         lots = pos.qty // pos.lot_size
         if lots < 2:  # can't sell a fraction of a single lot
             return None

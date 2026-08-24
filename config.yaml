@@ -73,6 +73,13 @@ strategy:
   partial_target_pct: 15
   partial_exit_fraction: 0.5
 
+# Span B strategy (separate dashboard page at /spanb; its own engine, paper state
+# and trade logs). Sells an OTM option on the Span B slope — short call when Span B
+# falls, short put when it rises — and buys it back when the slope reverts.
+spanb:
+  # how many strikes out of the money to sell
+  otm_strikes: 5
+
 options:
   # ITM option selection: pick the strike whose delta is closest to target_delta
   # within [delta_min, delta_max] (absolute value for puts).

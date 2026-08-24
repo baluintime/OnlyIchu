@@ -26,6 +26,7 @@ from . import settings as settings_mod
 from .candles import Candle, TimeframeAggregator
 from .config import Config, IndexConfig
 from .strategy import StrategyConfig, evaluate
+from .spanb import SpanbConfig, build_spanb_config, spanb_evaluate
 from .tzutil import get_zone
 from .upstox_api import UpstoxAPI, UpstoxError
 
@@ -464,14 +465,95 @@ def purge_trade_log(path: str, days: int) -> int:
     return removed
 
 
+def analyze_spanb_series(candles: list[Candle], params) -> dict | None:
+    """Span B slope snapshot for the Span B dashboard page."""
+    if not candles:
+        return None
+    highs = [c.high for c in candles]
+    lows = [c.low for c in candles]
+    needed = params.min_candles + 1
+    ev = spanb_evaluate(highs, lows, params)
+    if ev is None:
+        return {"ready": False, "needed": needed, "candles": len(candles)}
+    return {
+        "ready": True,
+        "span_b": round(ev.span_b, 2) if ev.span_b is not None else None,
+        "prev_span_b": round(ev.prev_span_b, 2) if ev.prev_span_b is not None else None,
+        "delta": round((ev.span_b - ev.prev_span_b), 2) if ev.span_b is not None else None,
+        "slope": ev.slope,
+        "signal": ev.signal,   # SELL_PUT (up) | SELL_CALL (down) | NEUTRAL
+        "candles": len(candles),
+    }
+
+
+class SpanbDashboardService:
+    """Builds the Span B page payload, reusing the main service's cached candle
+    fetching so the two pages don't double the Upstox calls."""
+
+    def __init__(self, cfg: Config, api: UpstoxAPI, base: "DashboardService"):
+        self.cfg = cfg
+        self.api = api
+        self.base = base
+        self.params = build_spanb_config(cfg).ich
+        self.otm_strikes = cfg.spanb_otm_strikes
+
+    def payload(self) -> dict:
+        now = self.base._now()
+        if not self.api.has_token:
+            return {"connected": False, "generated_at": now.strftime("%H:%M:%S"),
+                    "market": {"status": self.base._market_status(now)}, "indices": [], "error": None,
+                    "otm_strikes": self.otm_strikes}
+        indices: list[dict] = []
+        error = None
+        ltps: dict = {}
+        try:
+            ltps = self.api.ltp([ix.key for ix in self.cfg.enabled_instruments])
+        except Exception as exc:  # noqa: BLE001
+            log.warning("spanb ltp fetch failed: %s", exc)
+        for index in self.cfg.enabled_instruments:
+            entry = {"name": index.name, "key": index.key, "ltp": ltps.get(index.key),
+                     "options_available": index.options_available, "trade_enabled": index.trade_enabled,
+                     "pipelines": [], "error": None}
+            try:
+                one_min = self.base._index_candles(index)
+            except UpstoxError as exc:
+                entry["error"] = str(exc)[:200]
+                indices.append(entry)
+                error = error or "Some indices failed to load — see index cards."
+                continue
+            for tf in self.cfg.timeframes_minutes:
+                if tf == 1:
+                    series = one_min
+                else:
+                    agg = TimeframeAggregator(tf)
+                    series = [done for c in one_min if (done := agg.feed(c))]
+                a = analyze_spanb_series(series, self.params) or {"ready": False, "candles": 0}
+                a["timeframe"] = f"{tf}m"
+                entry["pipelines"].append(a)
+            indices.append(entry)
+        return {
+            "connected": True,
+            "generated_at": now.strftime("%H:%M:%S"),
+            "generated_date": now.strftime("%a, %d %b %Y"),
+            "refresh_seconds": self.cfg.web_refresh_seconds,
+            "market": {"status": self.base._market_status(now),
+                       "session": f"{self.cfg.market_open.strftime('%H:%M')}–{self.cfg.market_close.strftime('%H:%M')} IST"},
+            "otm_strikes": self.otm_strikes,
+            "params": f"Span B {self.params.senkou_b} (disp {self.params.displacement})",
+            "error": error,
+            "indices": indices,
+        }
+
+
 class TradingController:
     """Starts/stops the trading Engine in a background thread, switchable
     between paper and live mode from the dashboard."""
 
-    def __init__(self, cfg: Config, api: UpstoxAPI, token: str | None = None):
+    def __init__(self, cfg: Config, api: UpstoxAPI, token: str | None = None, engine_cls=None):
         self.base_cfg = cfg
         self.api = api
         self.token = token
+        self._engine_cls = engine_cls  # None -> Ichimoku Engine (lazy import)
         self._lock = threading.Lock()
         self._engine = None
         self._thread: threading.Thread | None = None
@@ -484,7 +566,10 @@ class TradingController:
         return self._thread is not None and self._thread.is_alive()
 
     def start(self, mode: str) -> tuple[bool, str]:
-        from .engine import Engine
+        engine_cls = self._engine_cls
+        if engine_cls is None:
+            from .engine import Engine
+            engine_cls = Engine
 
         with self._lock:
             if self.running:
@@ -495,7 +580,7 @@ class TradingController:
             cfg.mode = mode
             api = UpstoxAPI(self.token) if self.token else self.api
             try:
-                engine = Engine(cfg, api)
+                engine = engine_cls(cfg, api)
             except Exception as exc:  # noqa: BLE001
                 self.last_error = f"{type(exc).__name__}: {exc}"
                 return False, self.last_error
@@ -557,8 +642,8 @@ class TradingController:
         if running and self._engine is not None:
             engine = self._engine
             broker = engine.broker
-            st["sync_ok"] = engine._sync_ok
-            st["position_mismatch"] = engine._position_mismatch
+            st["sync_ok"] = getattr(engine, "_sync_ok", True)
+            st["position_mismatch"] = getattr(engine, "_position_mismatch", [])
             realized = broker.realized_pnl_today()
             unrealized, detail = broker.mark_to_market()
             st["realized_pnl_today"] = realized
@@ -566,8 +651,8 @@ class TradingController:
             st["total_pnl"] = realized + unrealized
             st["charges_today"] = broker.state.charges_today
             st["profit_target"] = engine.cfg.daily_profit_target or None
-            st["halted"] = engine._halted
-            st["halt_reason"] = engine._halt_reason or None
+            st["halted"] = getattr(engine, "_halted", False)
+            st["halt_reason"] = getattr(engine, "_halt_reason", "") or None
             if engine.cfg.mode == "paper":
                 st["cash"] = broker.state.cash
             st["positions"] = [
@@ -689,6 +774,21 @@ def create_app(cfg: Config, api: UpstoxAPI, token: str | None = None) -> Flask:
     controller = TradingController(cfg, api, token)
     auth_mgr = AuthManager(api, controller)
 
+    # Span B strategy (separate page + its own engine); shares candle fetching but
+    # keeps its own paper state and trade logs so the two strategies never collide
+    from .spanb_engine import SpanbEngine
+
+    def _spanb_path(p: str) -> str:
+        root, ext = os.path.splitext(p)
+        return f"{root}_spanb{ext}"
+
+    spanb_cfg = copy.copy(cfg)
+    spanb_cfg.paper_state_file = _spanb_path(cfg.paper_state_file)
+    spanb_cfg.paper_trade_log = _spanb_path(cfg.paper_trade_log)
+    spanb_cfg.live_trade_log = _spanb_path(cfg.live_trade_log)
+    spanb_service = SpanbDashboardService(spanb_cfg, api, service)
+    spanb_controller = TradingController(spanb_cfg, api, token, engine_cls=SpanbEngine)
+
     @app.get("/")
     def dashboard():  # type: ignore[unused-variable]
         return render_template("dashboard.html", refresh_seconds=cfg.web_refresh_seconds)
@@ -704,6 +804,58 @@ def create_app(cfg: Config, api: UpstoxAPI, token: str | None = None) -> Flask:
             "daily_profit_target": cfg.daily_profit_target,
         }
         return jsonify(payload)
+
+    # -------------------------------------------------- Span B strategy page
+
+    @app.get("/spanb")
+    def spanb_page():  # type: ignore[unused-variable]
+        return render_template("spanb.html", refresh_seconds=cfg.web_refresh_seconds)
+
+    @app.get("/api/spanb/dashboard")
+    def api_spanb_dashboard():  # type: ignore[unused-variable]
+        payload = dict(spanb_service.payload())
+        payload["trading"] = spanb_controller.status()
+        payload["auth"] = auth_mgr.status()
+        payload["settings"] = {
+            "lots_per_trade": cfg.lots_per_trade,
+            "otm_strikes": cfg.spanb_otm_strikes,
+        }
+        return jsonify(payload)
+
+    @app.post("/api/spanb/trading/start")
+    def spanb_start():  # type: ignore[unused-variable]
+        body = request.get_json(silent=True) or {}
+        mode = str(body.get("mode", "paper")).lower()
+        if mode == "live" and body.get("confirm") != "LIVE":
+            return jsonify({"ok": False, "message": 'LIVE mode places real orders — confirmation "LIVE" required'}), 400
+        ok, msg = spanb_controller.start(mode)
+        return jsonify({"ok": ok, "message": msg}), (200 if ok else 409)
+
+    @app.post("/api/spanb/trading/stop")
+    def spanb_stop():  # type: ignore[unused-variable]
+        ok, msg = spanb_controller.stop()
+        return jsonify({"ok": ok, "message": msg}), (200 if ok else 409)
+
+    @app.post("/api/spanb/trading/squareoff")
+    def spanb_squareoff():  # type: ignore[unused-variable]
+        ok, msg = spanb_controller.square_off()
+        return jsonify({"ok": ok, "message": msg}), (200 if ok else 409)
+
+    @app.get("/api/spanb/trades")
+    def api_spanb_trades():  # type: ignore[unused-variable]
+        mode = request.args.get("mode", "paper")
+        path = spanb_cfg.live_trade_log if mode == "live" else spanb_cfg.paper_trade_log
+        return jsonify({"mode": mode, "trades": read_trade_log(path)})
+
+    @app.get("/spanb/trades.csv")
+    def spanb_trades_csv():  # type: ignore[unused-variable]
+        mode = request.args.get("mode", "paper")
+        path = spanb_cfg.live_trade_log if mode == "live" else spanb_cfg.paper_trade_log
+        if not os.path.exists(path):
+            return jsonify({"ok": False, "message": f"no {mode} spanb trades logged yet"}), 404
+        return send_file(os.path.abspath(path), as_attachment=True,
+                         download_name=f"onlyichu_spanb_{mode}_{datetime.now().strftime('%Y%m%d')}.csv",
+                         mimetype="text/csv")
 
     # ------------------------------------------------------------- auth
 

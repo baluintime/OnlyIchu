@@ -110,6 +110,42 @@ def test_flask_routes(tmp_path):
     assert body["trading"]["running"] is False
 
 
+def test_spanb_page_and_dashboard(tmp_path):
+    app = create_app(make_cfg(tmp_path), FakeAPI())
+    client = app.test_client()
+    page = client.get("/spanb")
+    assert page.status_code == 200
+    assert b"Span B" in page.data
+    body = client.get("/api/spanb/dashboard").get_json()
+    assert body["connected"] is True
+    assert body["otm_strikes"] == 5
+    (ix,) = body["indices"]
+    assert ix["name"] == "FAKE"
+    assert [p["timeframe"] for p in ix["pipelines"]] == ["1m", "5m"]
+    # long steady uptrend in the fixture -> Span B rising -> SELL_PUT
+    assert ix["pipelines"][0]["ready"] is True
+    assert ix["pipelines"][0]["slope"] == "UP"
+    assert ix["pipelines"][0]["signal"] == "SELL_PUT"
+    assert body["trading"]["running"] is False
+
+
+def test_spanb_live_start_requires_confirmation(tmp_path):
+    app = create_app(make_cfg(tmp_path), FakeAPI())
+    client = app.test_client()
+    resp = client.post("/api/spanb/trading/start", json={"mode": "live"})
+    assert resp.status_code == 400
+
+
+def test_spanb_trades_separate_from_ichimoku(tmp_path):
+    # the Span B engine uses its own trade-log files (suffix _spanb)
+    cfg = make_cfg(tmp_path)
+    cfg.paper_trade_log = str(tmp_path / "trades_paper.csv")
+    app = create_app(cfg, FakeAPI())
+    client = app.test_client()
+    assert client.get("/api/spanb/trades?mode=paper").get_json()["trades"] == []
+    assert client.get("/spanb/trades.csv?mode=paper").status_code == 404
+
+
 def test_live_start_requires_confirmation(tmp_path):
     app = create_app(make_cfg(tmp_path), FakeAPI())
     client = app.test_client()

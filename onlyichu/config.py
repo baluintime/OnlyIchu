@@ -88,6 +88,9 @@ class Config:
     stamp_buy_pct: float = 0.00003
     gst_pct: float = 0.18
 
+    # --- Span B strategy (separate page): sell OTM options on Span B slope ---
+    spanb_otm_strikes: int = 5
+
     lots_per_trade: int = 1
     max_trades_per_day_per_pipeline: int = 10
     max_daily_loss: float = 10000.0
@@ -182,6 +185,9 @@ def load_config(path: str = "config.yaml") -> Config:
     cfg.sebi_pct = float(ch.get("sebi_pct", cfg.sebi_pct))
     cfg.stamp_buy_pct = float(ch.get("stamp_buy_pct", cfg.stamp_buy_pct))
     cfg.gst_pct = float(ch.get("gst_pct", cfg.gst_pct))
+
+    spanb = raw.get("spanb", {}) or {}
+    cfg.spanb_otm_strikes = int(spanb.get("otm_strikes", cfg.spanb_otm_strikes))
 
     risk = raw.get("risk", {}) or {}
     cfg.lots_per_trade = int(risk.get("lots_per_trade", cfg.lots_per_trade))

@@ -92,6 +92,30 @@ def test_trade_log_records_candle_time(tmp_path):
     assert rows[1]["action"].startswith("EXIT") and rows[1]["candle_time"] == "2026-08-21T09:45:00"
 
 
+def test_short_option_roundtrip(tmp_path):
+    # Span B strategy: sell-to-open (collect premium), buy-to-close
+    cfg = make_cfg(tmp_path)
+    api = FakeAPI({"NSE_FO|1": 100.0})
+    broker = PaperBroker(cfg, api)
+    pos = broker.enter("MIDCPNIFTY:5m", "NSE_FO|1", "MIDCP 14900 CE", 120, "SHORT_CALL", None, short=True)
+    assert pos is not None and pos.short is True and pos.entry_price == 100.0
+    assert broker.state.cash == 100000.0 + 100.0 * 120       # premium collected
+    api.prices["NSE_FO|1"] = 70.0                            # premium decays -> writer profits
+    pnl = broker.exit("MIDCPNIFTY:5m", price_hint=None)
+    assert pnl == (100.0 - 70.0) * 120                       # (entry - exit) * qty
+    assert broker.state.cash == 100000.0 + 100.0 * 120 - 70.0 * 120
+    assert broker.position("MIDCPNIFTY:5m") is None
+
+
+def test_short_option_loss_when_premium_rises(tmp_path):
+    cfg = make_cfg(tmp_path)
+    api = FakeAPI({"NSE_FO|1": 100.0})
+    broker = PaperBroker(cfg, api)
+    broker.enter("X:1m", "NSE_FO|1", "NIFTY 25000 PE", 75, "SHORT_PUT", None, short=True)
+    api.prices["NSE_FO|1"] = 130.0                           # premium rises -> writer loses
+    assert broker.exit("X:1m", price_hint=None) == (100.0 - 130.0) * 75
+
+
 def test_paper_option_roundtrip(tmp_path):
     cfg = make_cfg(tmp_path)
     api = FakeAPI({"NSE_FO|123": 100.0})

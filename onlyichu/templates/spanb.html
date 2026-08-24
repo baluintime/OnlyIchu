@@ -1,0 +1,251 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OnlyIchu · Span B</title>
+<style>
+  :root{
+    --bg:#0b0f17; --card:#121826; --card-border:#1e2740; --text:#e6edf7; --muted:#8595b3;
+    --green:#22c55e; --red:#ef4444; --cyan:#22d3ee; --amber:#f59e0b; --up:#22c55e; --down:#ef4444;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 system-ui,Segoe UI,Roboto,sans-serif}
+  a{color:var(--cyan);text-decoration:none}
+  .wrap{max-width:1180px;margin:0 auto;padding:16px}
+  header{display:flex;align-items:center;gap:14px;flex-wrap:wrap;background:var(--card);
+    border:1px solid var(--card-border);border-radius:14px;padding:14px 18px;margin-bottom:14px}
+  h1{font-size:18px;margin:0;letter-spacing:.5px}
+  .sub{color:var(--muted);font-size:12px}
+  .pill{margin-left:auto;padding:6px 12px;border-radius:20px;font-size:12px;border:1px solid var(--card-border)}
+  .pill.open{color:var(--green);border-color:rgba(34,197,94,.4)}
+  .pill.closed{color:var(--muted)}
+  .ctrl{display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:var(--card);
+    border:1px solid var(--card-border);border-radius:14px;padding:12px 16px;margin-bottom:14px}
+  .ctrl-label{font-size:11px;letter-spacing:1px;color:var(--muted);text-transform:uppercase}
+  .seg{display:inline-flex;border:1px solid var(--card-border);border-radius:8px;overflow:hidden}
+  .seg button{background:transparent;color:var(--muted);border:0;padding:7px 14px;cursor:pointer;font-weight:700;font-size:12px}
+  .seg button.active{background:rgba(34,211,238,.15);color:var(--cyan)}
+  .btn{background:#1b2437;color:var(--text);border:1px solid var(--card-border);
+    border-radius:8px;padding:7px 13px;cursor:pointer;font-size:12px;font-weight:700}
+  .btn.go{border-color:rgba(34,197,94,.5);color:var(--green)}
+  .btn.warn{border-color:rgba(239,68,68,.5);color:var(--red)}
+  .num{display:inline-flex;align-items:center;gap:7px}
+  .num span{font-size:10.5px;letter-spacing:1px;color:var(--muted)}
+  .num input{width:70px;background:#0e1420;border:1px solid var(--card-border);color:var(--text);border-radius:7px;padding:6px 8px}
+  .status{margin-left:auto;font-size:12px;font-weight:700}
+  .msg{width:100%;font-size:12px;color:var(--muted)}
+  .strip{display:flex;gap:22px;flex-wrap:wrap;background:var(--card);border:1px solid var(--card-border);
+    border-radius:14px;padding:12px 18px;margin-bottom:14px}
+  .kv small{display:block;font-size:10px;letter-spacing:1px;color:var(--muted);text-transform:uppercase}
+  .kv b{font-size:16px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:14px}
+  .card{background:var(--card);border:1px solid var(--card-border);border-radius:14px;padding:14px 16px}
+  .card h2{margin:0 0 2px;font-size:16px}
+  .card .key{color:var(--muted);font-size:11px}
+  .ltp{float:right;text-align:right}
+  .ltp b{font-size:18px}
+  .pl{display:flex;gap:10px;margin-top:12px}
+  .tf{flex:1;background:#0e1420;border:1px solid var(--card-border);border-radius:10px;padding:10px}
+  .tf .tfh{font-size:11px;color:var(--muted);letter-spacing:1px;margin-bottom:6px}
+  .sig{font-weight:800;letter-spacing:.5px;padding:3px 8px;border-radius:6px;display:inline-block;font-size:12px}
+  .sig.SELL_PUT{color:var(--green);background:rgba(34,197,94,.14)}
+  .sig.SELL_CALL{color:var(--red);background:rgba(239,68,68,.14)}
+  .sig.NEUTRAL{color:var(--muted);background:rgba(133,149,179,.12)}
+  .slope{font-size:12px;margin-top:8px}
+  .slope .up{color:var(--up)} .slope .down{color:var(--down)} .slope .flat{color:var(--muted)}
+  .spanb-row{display:flex;justify-content:space-between;font-size:12px;margin-top:6px;color:var(--muted)}
+  .spanb-row b{color:var(--text)}
+  .warmup{color:var(--amber);font-size:12px}
+  table{width:100%;border-collapse:collapse;font-size:12.5px}
+  th,td{text-align:left;padding:7px 9px;border-bottom:1px solid var(--card-border)}
+  th{color:var(--muted);font-size:10.5px;letter-spacing:.6px;text-transform:uppercase}
+  .pos-chip{display:inline-block;padding:4px 9px;border-radius:7px;font-size:12px;border:1px solid var(--card-border);margin:3px 4px 0 0}
+  .pos-chip.SHORT_CALL{border-color:rgba(239,68,68,.4)} .pos-chip.SHORT_PUT{border-color:rgba(34,197,94,.4)}
+  .banner{background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.4);color:#fca5a5;
+    border-radius:10px;padding:9px 14px;margin-bottom:12px;display:none}
+  .banner.show{display:block}
+  .note{font-size:12px;color:var(--muted);margin-top:14px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>OnlyIchu · <span style="color:var(--cyan)">Span B</span></h1>
+      <div class="sub" id="meta">Sell OTM on Span B slope · loading…</div>
+    </div>
+    <a class="btn" href="/">← Ichimoku page</a>
+    <span class="pill closed" id="marketPill">MARKET …</span>
+  </header>
+
+  <div class="ctrl">
+    <span class="ctrl-label">Span B engine</span>
+    <div class="seg" id="segMode">
+      <button class="active" data-mode="paper">PAPER</button>
+      <button data-mode="live">LIVE</button>
+    </div>
+    <button class="btn go" id="btnStart">▶ START</button>
+    <button class="btn warn" id="btnSquare" style="display:none">SQUARE OFF ALL</button>
+    <span class="num"><span>OTM STRIKES</span><b id="otmStrikes" style="font-size:14px">5</b></span>
+    <span class="status" id="engineStatus">ENGINE STOPPED</span>
+    <div class="msg" id="ctrlMsg"></div>
+  </div>
+
+  <div class="banner" id="banner"></div>
+
+  <div class="strip" id="strip" style="display:none">
+    <div class="kv"><small id="cashLabel">Paper cash</small><b id="cash">—</b></div>
+    <div class="kv"><small>Realized (net)</small><b id="realized">—</b></div>
+    <div class="kv"><small>Unrealized</small><b id="unreal">—</b></div>
+    <div class="kv"><small>Total P&amp;L</small><b id="total">—</b></div>
+    <div class="kv"><small>Open positions</small><b id="count">0</b></div>
+    <div id="positions" style="display:flex;flex-wrap:wrap"></div>
+  </div>
+
+  <div class="grid" id="grid"></div>
+
+  <section class="card" style="margin-top:16px">
+    <div style="display:flex;align-items:center;gap:12px">
+      <h2 style="font-size:15px">📒 Span B Trade Log</h2>
+      <div class="seg" id="segLog">
+        <button class="active" data-log="paper">PAPER</button>
+        <button data-log="live">LIVE</button>
+      </div>
+      <a class="btn" id="btnDownload" href="/spanb/trades.csv?mode=paper">⬇ CSV</a>
+      <span class="sub" id="logCount"></span>
+    </div>
+    <div style="overflow-x:auto;margin-top:8px">
+      <table>
+        <thead><tr><th>Time</th><th>Candle close</th><th>Pipeline</th><th>Action</th>
+          <th>Symbol</th><th>Side</th><th>Qty</th><th>Price</th><th>PnL ₹</th><th>Charges ₹</th></tr></thead>
+        <tbody id="logBody"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <div class="note">Span B falling → sell OTM Call · Span B rising → sell OTM Put · exit when the slope reverts.
+    Sold to open (premium collected), bought to close. Educational use only — not investment advice.</div>
+</div>
+
+<script>
+const $=(id)=>document.getElementById(id);
+const fmt=new Intl.NumberFormat("en-IN",{maximumFractionDigits:2});
+let desiredMode="paper", logMode="paper", trading={running:false,mode:null};
+
+function money(v){return (v>=0?"+₹ ":"-₹ ")+fmt.format(Math.abs(v));}
+function colorOf(v){return v>0?"var(--green)":v<0?"var(--red)":"var(--text)";}
+
+document.querySelectorAll("#segMode button").forEach(b=>b.addEventListener("click",()=>{
+  if(trading.running) return;
+  desiredMode=b.dataset.mode;
+  document.querySelectorAll("#segMode button").forEach(x=>x.classList.toggle("active",x.dataset.mode===desiredMode));
+}));
+document.querySelectorAll("#segLog button").forEach(b=>b.addEventListener("click",()=>{
+  logMode=b.dataset.log;
+  document.querySelectorAll("#segLog button").forEach(x=>x.classList.toggle("active",x.dataset.log===logMode));
+  $("btnDownload").href="/spanb/trades.csv?mode="+logMode;
+  loadTrades();
+}));
+
+async function post(url,body){
+  const r=await fetch(url,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body||{})});
+  return {ok:r.ok,data:await r.json().catch(()=>({}))};
+}
+$("btnStart").addEventListener("click",async()=>{
+  if(trading.running){ const {data}=await post("/api/spanb/trading/stop"); $("ctrlMsg").textContent=data.message||""; loadData(); return; }
+  let body={mode:desiredMode};
+  if(desiredMode==="live"){ if(prompt('LIVE places REAL orders. Type LIVE to confirm')!=="LIVE"){return;} body.confirm="LIVE"; }
+  const {data}=await post("/api/spanb/trading/start",body);
+  $("ctrlMsg").textContent=data.message||""; loadData();
+});
+$("btnSquare").addEventListener("click",async()=>{
+  if(!confirm("Square off ALL Span B positions at market?"))return;
+  const {data}=await post("/api/spanb/trading/squareoff"); $("ctrlMsg").textContent=data.message||""; loadData();
+});
+
+function renderCard(ix){
+  const div=document.createElement("div"); div.className="card";
+  const ltp=ix.ltp!=null?fmt.format(ix.ltp):"—";
+  let tfs="";
+  (ix.pipelines||[]).forEach(p=>{
+    if(!p.ready){ tfs+=`<div class="tf"><div class="tfh">${p.timeframe}</div><div class="warmup">warming up (${p.candles||0}/${p.needed||"?"})</div></div>`; return; }
+    const slopeCls=p.slope==="UP"?"up":p.slope==="DOWN"?"down":"flat";
+    const arrow=p.slope==="UP"?"▲":p.slope==="DOWN"?"▼":"■";
+    const sig=(p.signal||"NEUTRAL").replace("_"," ");
+    tfs+=`<div class="tf">
+      <div class="tfh">${p.timeframe}</div>
+      <span class="sig ${p.signal}">${sig}</span>
+      <div class="slope"><span class="${slopeCls}">${arrow} Span B ${p.slope}</span></div>
+      <div class="spanb-row"><span>Span B</span><b>${fmt.format(p.span_b)}</b></div>
+      <div class="spanb-row"><span>prev</span><b>${fmt.format(p.prev_span_b)}</b></div>
+      <div class="spanb-row"><span>Δ</span><b style="color:${colorOf(p.delta)}">${p.delta>=0?"+":""}${fmt.format(p.delta)}</b></div>
+    </div>`;
+  });
+  div.innerHTML=`<div class="ltp"><b>${ltp}</b></div><h2>${ix.name}</h2>
+    <div class="key">${ix.key}</div>${ix.error?`<div class="warmup">${ix.error}</div>`:""}<div class="pl">${tfs}</div>`;
+  return div;
+}
+
+async function loadData(){
+  let data;
+  try{ data=await (await fetch("/api/spanb/dashboard",{cache:"no-store"})).json(); }catch(e){ return; }
+  const st=(data.market&&data.market.status)||"…";
+  $("marketPill").textContent="MARKET "+st; $("marketPill").className="pill "+(st==="OPEN"?"open":"closed");
+  $("meta").textContent=(data.params||"Span B")+" · "+(data.otm_strikes!=null?data.otm_strikes+" strikes OTM":"")+" · updated "+(data.generated_at||"");
+  if(data.otm_strikes!=null)$("otmStrikes").textContent=data.otm_strikes;
+  const banner=$("banner"); banner.className="banner"+(data.error?" show":""); if(data.error)banner.textContent="⚠ "+data.error;
+
+  const grid=$("grid"); grid.innerHTML="";
+  (data.indices||[]).forEach(ix=>grid.appendChild(renderCard(ix)));
+  if(!data.connected){ grid.innerHTML=`<div class="card">Connect Upstox on the <a href="/">main page</a> first.</div>`; }
+
+  const t=data.trading||{}; trading={running:!!t.running,mode:t.mode};
+  $("engineStatus").textContent=t.running?("● ENGINE RUNNING · "+(t.mode||"").toUpperCase()):"ENGINE STOPPED";
+  $("engineStatus").style.color=t.running?"var(--green)":"var(--muted)";
+  $("btnStart").textContent=t.running?"■ STOP":"▶ START";
+  $("btnStart").className="btn "+(t.running?"warn":"go");
+  $("btnSquare").style.display=t.running?"":"none";
+  if(t.running){document.querySelectorAll("#segMode button").forEach(x=>x.classList.toggle("active",x.dataset.mode===t.mode));}
+
+  const strip=$("strip");
+  if(t.running){
+    strip.style.display="";
+    $("cashLabel").textContent=t.mode==="live"?"Live engine":"Paper cash";
+    $("cash").textContent=t.cash!=null?"₹ "+fmt.format(t.cash):"—";
+    const r=t.realized_pnl_today??0,u=t.unrealized_pnl??0,tot=t.total_pnl??0;
+    $("realized").textContent=money(r); $("realized").style.color=colorOf(r);
+    $("unreal").textContent=money(u); $("unreal").style.color=colorOf(u);
+    $("total").textContent=money(tot); $("total").style.color=colorOf(tot);
+    const pos=t.positions||[]; $("count").textContent=pos.length;
+    const box=$("positions"); box.innerHTML="";
+    pos.forEach(p=>{const c=document.createElement("span");c.className="pos-chip "+(p.direction||"");
+      let s=`${p.pipeline} · ${p.symbol}`; if(p.strike!=null)s+=` (${fmt.format(p.strike)})`;
+      s+=` ×${p.qty} @${fmt.format(p.entry_price)}`; if(p.ltp!=null)s+=`→${fmt.format(p.ltp)}`;
+      if(p.upnl!=null)s+=`  ${p.upnl>=0?"+":""}${fmt.format(p.upnl)}`; c.textContent=s; box.appendChild(c);});
+  } else { strip.style.display="none"; }
+}
+
+async function loadTrades(){
+  let data; try{ data=await (await fetch("/api/spanb/trades?mode="+logMode,{cache:"no-store"})).json(); }catch(e){return;}
+  if(data.mode!==logMode)return;
+  const trades=data.trades||[]; $("logCount").textContent=trades.length?trades.length+" trades":"no trades yet";
+  const body=$("logBody"); body.innerHTML="";
+  trades.forEach(tr=>{
+    const pnl=parseFloat(tr.pnl||"0"); const isEntry=(tr.action||"").startsWith("ENTRY");
+    const row=document.createElement("tr");
+    row.innerHTML=`<td>${(tr.time||"").replace("T"," ")}</td><td>${tr.candle_time?tr.candle_time.replace("T"," "):"—"}</td>
+      <td>${tr.pipeline||""}</td><td>${tr.action||""}</td><td>${tr.symbol||""}</td><td>${tr.direction||""}</td>
+      <td>${tr.qty||""}</td><td>${tr.price?fmt.format(parseFloat(tr.price)):""}</td>
+      <td style="color:${isEntry?"var(--text)":colorOf(pnl)}">${isEntry?"—":(pnl>=0?"+":"")+fmt.format(pnl)}</td>
+      <td>${tr.charges&&parseFloat(tr.charges)>0?"-"+fmt.format(parseFloat(tr.charges)):"—"}</td>`;
+    body.appendChild(row);
+  });
+}
+
+const REFRESH=(Number("{{ refresh_seconds }}")||10)*1000;
+loadData(); loadTrades();
+setInterval(loadData,REFRESH); setInterval(loadTrades,REFRESH);
+</script>
+</body>
+</html>
