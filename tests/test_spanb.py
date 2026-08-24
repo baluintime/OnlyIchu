@@ -116,3 +116,68 @@ def test_spanb_engine_constructs_and_warms_up(tmp_path):
     assert len(e.runners) == 1
     ev = e.runners[0].pipelines[1].evaluate()
     assert ev is not None and ev.slope in ("UP", "DOWN", "FLAT")
+
+
+def test_prime_opens_short_call_on_standing_down_slope(tmp_path):
+    from datetime import datetime, timedelta, timezone
+
+    from onlyichu.config import Config, IndexConfig
+    from onlyichu.spanb import SHORT_CALL
+    from onlyichu.spanb_engine import SpanbEngine
+
+    IST = timezone(timedelta(hours=5, minutes=30))
+
+    class FakeAPI:
+        access_token = "x"
+        has_token = True
+
+        def _rows(self, n, start, step, t0):
+            out, p = [], start
+            for i in range(n):
+                out.append([(t0 + timedelta(minutes=i)).isoformat(), p, p + 1, p - 1, p + step, 5, 0])
+                p += step
+            return list(reversed(out))
+
+        def historical_candles(self, key, to_date, from_date, unit="1minute"):
+            y = datetime(2026, 8, 20, 9, 15, tzinfo=IST)
+            return self._rows(200, 2000.0, -0.5, y)          # falling -> Span B DOWN -> SELL_CALL
+
+        def intraday_candles(self, key, unit="1minute"):
+            t = datetime.now(IST).replace(hour=9, minute=15, second=0, microsecond=0) - timedelta(hours=9)
+            return self._rows(60, 1900.0, -1.0, t)
+
+        def ltp_single(self, k):
+            return 30.0
+
+        def ltp(self, keys):
+            return {k: 30.0 for k in keys}
+
+        def option_contracts(self, key):
+            return [{"expiry": "2026-08-27", "lot_size": 50}]
+
+        def option_chain(self, key, expiry):
+            spot = 1841.0  # near the downtrend's last close
+            rows = []
+            for k in range(1600, 2101, 50):  # strikes around spot, 50 apart
+                leg = {"instrument_key": f"NSE_FO|{k}", "trading_symbol": f"X {k} CE",
+                       "market_data": {"ltp": 30.0, "oi": 1000, "volume": 500, "bid_price": 29.5, "ask_price": 30.5},
+                       "option_greeks": {"delta": 0.3}}
+                pleg = dict(leg); pleg["instrument_key"] = f"NSE_FO|{k}P"; pleg["trading_symbol"] = f"X {k} PE"
+                rows.append({"strike_price": k, "call_options": leg, "put_options": pleg})
+            return rows
+
+    cfg = Config()
+    cfg.tenkan, cfg.kijun, cfg.senkou_b, cfg.displacement = 3, 9, 12, 3
+    cfg.spanb_otm_strikes = 5
+    cfg.min_volume = 1
+    cfg.paper_state_file = str(tmp_path / "s.json")
+    cfg.paper_trade_log = str(tmp_path / "t.csv")
+    cfg.market_open = __import__("datetime").time(0, 0)
+    cfg.entry_cutoff = __import__("datetime").time(23, 59)
+    cfg.instruments = [IndexConfig("NIFTY", "NSE_INDEX|Nifty 50", True, True)]
+
+    e = SpanbEngine(cfg, FakeAPI())
+    e.warmup()
+    e.prime_from_current_state()
+    shorts = [p for p in e.broker.open_positions() if p.short and p.direction == SHORT_CALL]
+    assert shorts, "a falling Span B should open a short CALL at startup"

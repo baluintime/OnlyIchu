@@ -21,7 +21,7 @@ from .config import Config, IndexConfig
 from .options import OptionSelector
 from .spanb import (
     EXIT, SELL_CALL, SELL_PUT, SHORT_CALL, SHORT_PUT,
-    SpanbConfig, SpanbPipeline, SpanbSignal, build_spanb_config,
+    SpanbConfig, SpanbPipeline, SpanbSignal, build_spanb_config, spanb_decide,
 )
 from .tzutil import get_zone
 from .upstox_api import UpstoxAPI, UpstoxError
@@ -112,6 +112,13 @@ class SpanbEngine:
             self._stop = stop_event
         log.info("spanb engine starting in %s mode with %d indices", self.cfg.mode.upper(), len(self.runners))
         self.warmup()
+        # act on any standing signal from the last completed candle immediately,
+        # so a slope that's already DOWN/UP at start trades now instead of waiting
+        # for a rare non-flat new close (Span B moves slowly). Still close-only:
+        # the decision uses the last COMPLETED candle, not an in-progress one.
+        now = self._now()
+        if self.cfg.market_open <= now.time() < self.cfg.entry_cutoff:
+            self.prime_from_current_state()
         while not self._stop.is_set():
             now = self._now()
             t = now.time()
@@ -153,6 +160,22 @@ class SpanbEngine:
                     done = agg.feed(candle)
                     if done is not None:
                         self._process_candle(runner, tf, done)
+
+    def prime_from_current_state(self) -> None:
+        """One-shot at startup: evaluate the last completed candle per pipeline and
+        act on any standing signal, so a slope already DOWN/UP trades immediately
+        instead of waiting for the next (often FLAT) close."""
+        for runner in self.runners:
+            for pipeline in runner.pipelines.values():
+                if not pipeline.series.candles:
+                    continue
+                side = self.broker.position_side(pipeline.pipeline_id)
+                ev = pipeline.evaluate()
+                if ev is None:
+                    continue
+                candle = pipeline.series.candles[-1]
+                for action in spanb_decide(ev, side):
+                    self._execute(runner, SpanbSignal(pipeline.pipeline_id, action, candle, ev.span_b or 0.0))
 
     def _process_candle(self, runner: SpanbRunner, tf: int, candle: Candle) -> None:
         pipeline = runner.pipelines.get(tf)

@@ -93,6 +93,7 @@
   </div>
 
   <div class="banner" id="banner"></div>
+  <div class="banner" id="skipBanner" style="background:rgba(245,158,11,.12);border-color:rgba(245,158,11,.4);color:#fcd34d"></div>
 
   <div class="strip" id="strip" style="display:none">
     <div class="kv"><small id="cashLabel">Paper cash</small><b id="cash">—</b></div>
@@ -195,6 +196,9 @@ async function loadData(){
   $("meta").textContent=(data.params||"Span B")+" · "+(data.otm_strikes!=null?data.otm_strikes+" strikes OTM":"")+" · updated "+(data.generated_at||"");
   if(data.otm_strikes!=null)$("otmStrikes").textContent=data.otm_strikes;
   const banner=$("banner"); banner.className="banner"+(data.error?" show":""); if(data.error)banner.textContent="⚠ "+data.error;
+  const skips=(data.trading&&data.trading.skips)||[]; const sb=$("skipBanner");
+  if(skips.length){ sb.className="banner show"; sb.textContent="⏭ "+skips.map(s=>`${s.pipeline}: ${s.reason}`).join(" · "); }
+  else { sb.className="banner"; }
 
   const grid=$("grid"); grid.innerHTML="";
   (data.indices||[]).forEach(ix=>grid.appendChild(renderCard(ix)));
