@@ -90,6 +90,11 @@ class Config:
 
     # --- Span B strategy (separate page): sell OTM options on Span B slope ---
     spanb_otm_strikes: int = 5
+    # The Span B strategy uses its OWN (faster) Span B period so the line tracks
+    # intraday moves and its slope actually flips — the Ichimoku senkou_b=120 is
+    # too slow for this (flat ~90% of candles). Lower = more responsive/more trades.
+    spanb_senkou_b: int = 52
+    spanb_displacement: int = 0
 
     lots_per_trade: int = 1
     max_trades_per_day_per_pipeline: int = 10
@@ -188,6 +193,8 @@ def load_config(path: str = "config.yaml") -> Config:
 
     spanb = raw.get("spanb", {}) or {}
     cfg.spanb_otm_strikes = int(spanb.get("otm_strikes", cfg.spanb_otm_strikes))
+    cfg.spanb_senkou_b = int(spanb.get("senkou_b", cfg.spanb_senkou_b))
+    cfg.spanb_displacement = int(spanb.get("displacement", cfg.spanb_displacement))
 
     risk = raw.get("risk", {}) or {}
     cfg.lots_per_trade = int(risk.get("lots_per_trade", cfg.lots_per_trade))

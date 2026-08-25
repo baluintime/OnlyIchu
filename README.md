@@ -280,7 +280,16 @@ Both the **1m and 5m** pipelines run per index.
 
 It has its **own engine, paper state and trade logs** (files suffixed `_spanb`),
 so it never collides with the Ichimoku engine — start/stop it with the PAPER |
-LIVE controls on the `/spanb` page. Tune it under `spanb:` in `config.yaml`.
+LIVE controls on the `/spanb` page. On start it acts on any standing signal from
+the last completed candle (so it doesn't wait for a rare non-flat new close).
+
+**Span B period is independent and faster** (`spanb.senkou_b`, default **52**,
+`spanb.displacement`, default **0**). The Ichimoku cloud's `senkou_b: 120` is far
+too slow for a slope signal — it stays flat ~90% of intraday candles and reverses
+only 0–2 times a day, so the strategy would barely trade even as price swings.
+A shorter period makes the line track intraday moves; lower it further (e.g. 26)
+for more trades, raise it for fewer. Tune all of this under `spanb:` in
+`config.yaml`.
 
 ### Other commands
 

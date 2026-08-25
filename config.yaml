@@ -79,6 +79,12 @@ strategy:
 spanb:
   # how many strikes out of the money to sell
   otm_strikes: 5
+  # Span B period for THIS strategy (independent of the Ichimoku cloud's
+  # senkou_b: 120, which is flat ~90% of intraday candles and barely trades).
+  # Lower senkou_b + displacement 0 = a responsive line whose slope actually
+  # flips intraday. Raise senkou_b for fewer, slower signals.
+  senkou_b: 52
+  displacement: 0
 
 options:
   # ITM option selection: pick the strike whose delta is closest to target_delta

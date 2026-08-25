@@ -71,6 +71,17 @@ def test_min_candles():
     assert sc.min_candles == P.min_candles + 1
 
 
+def test_build_spanb_config_uses_own_faster_period():
+    from onlyichu.config import Config
+    from onlyichu.spanb import build_spanb_config
+
+    cfg = Config()
+    cfg.senkou_b, cfg.displacement = 120, 24     # the (slow) Ichimoku cloud period
+    cfg.spanb_senkou_b, cfg.spanb_displacement = 52, 0
+    sc = build_spanb_config(cfg)
+    assert sc.ich.senkou_b == 52 and sc.ich.displacement == 0   # not 120/24
+
+
 def test_spanb_engine_constructs_and_warms_up(tmp_path):
     from datetime import datetime, timedelta, timezone
 

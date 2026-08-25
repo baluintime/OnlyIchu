@@ -149,8 +149,14 @@ class SpanbPipeline:
 
 
 def build_spanb_config(cfg) -> SpanbConfig:
-    """Build a SpanbConfig from the app Config (duck-typed)."""
+    """Build a SpanbConfig from the app Config (duck-typed).
+
+    Uses the Span B strategy's OWN senkou_b/displacement (faster than the Ichimoku
+    cloud's) so the line responds to intraday moves. tenkan/kijun are unused by the
+    slope signal but IchimokuParams needs them."""
+    senkou_b = getattr(cfg, "spanb_senkou_b", cfg.senkou_b)
+    displacement = getattr(cfg, "spanb_displacement", cfg.displacement)
     return SpanbConfig(
-        ich=IchimokuParams(cfg.tenkan, cfg.kijun, cfg.senkou_b, cfg.displacement),
+        ich=IchimokuParams(cfg.tenkan, cfg.kijun, senkou_b, displacement),
         otm_strikes=getattr(cfg, "spanb_otm_strikes", 5),
     )
